@@ -1,6 +1,6 @@
 # hck_gpt/memory/proactive_monitor.py
 """
-Proactive Monitor — background thread that watches system state
+Proactive Monitor - background thread that watches system state
 and autonomously pushes alerts/tips to the hck_GPT panel.
 
 Monitored conditions:
@@ -15,7 +15,7 @@ Monitored conditions:
 Push mechanism:
   Register a callback via proactive_monitor.register_push(fn).
   The fn receives a single string message and is called from a
-  background thread — make sure to schedule it on the main thread
+  background thread - make sure to schedule it on the main thread
   (use tkinter's .after(0, ...) when registering).
 
 Silent notifications (banner):
@@ -40,28 +40,28 @@ THROTTLE_RATIO    = 0.60   # below 60 % of max = throttled
 CHECK_INTERVAL_S  = 45     # seconds between checks
 MIN_GAP_SAME_S    = 300    # don't repeat same alert within 5 min
 
-# Session budget — CHI 2025: max 3 unsolicited suggestions per 30-min window
+# Session budget - CHI 2025: max 3 unsolicited suggestions per 30-min window
 SESSION_BUDGET      = 3
 SESSION_WINDOW_S    = 1800   # 30-minute window
 
-# Process anomaly — new heavy process threshold
-PROC_SPIKE_PCT      = 30.0   # single process using >30% CPU → spike alert
+# Process anomaly - new heavy process threshold
+PROC_SPIKE_PCT      = 30.0   # single process using >30% CPU -> spike alert
 PROC_SPIKE_MIN_GAP  = 600    # 10 min cooldown per process name
 
 
-# ── Message pools — PL + EN ───────────────────────────────────────────────────
+# ── Message pools - PL + EN ───────────────────────────────────────────────────
 
 _MSGS: dict[str, dict[str, list[str]]] = {
     "cpu_high": {
         "pl": [
             "hck_GPT: ⚠ CPU na {val}% od dłuższego czasu. Wpisz 'top procesy' żeby zobaczyć winowajcę.",
-            "hck_GPT: CPU {val}% — coś go zjada. Jeśli to nie Ty, to kto? Wpisz 'top'.",
-            "hck_GPT: Uwaga — procesor na {val}%. Normalne? Czy może ktoś góruje w tle?",
+            "hck_GPT: CPU {val}% - coś go zjada. Jeśli to nie Ty, to kto? Wpisz 'top'.",
+            "hck_GPT: Uwaga - procesor na {val}%. Normalne? Czy może ktoś góruje w tle?",
         ],
         "en": [
             "hck_GPT: ⚠ CPU sustained at {val}%. Type 'top processes' to see who's responsible.",
-            "hck_GPT: CPU {val}% — something's eating it. Type 'top' to find out what.",
-            "hck_GPT: Heads up — CPU at {val}%. Expected load, or something sneaky in the background?",
+            "hck_GPT: CPU {val}% - something's eating it. Type 'top' to find out what.",
+            "hck_GPT: Heads up - CPU at {val}%. Expected load, or something sneaky in the background?",
         ],
     },
     "cpu_crit": {
@@ -76,62 +76,62 @@ _MSGS: dict[str, dict[str, list[str]]] = {
     },
     "ram_high": {
         "pl": [
-            "hck_GPT: ⚠ RAM na {val}% — system może zaraz sięgnąć po plik wymiany. Wpisz 'dlaczego ram wysoki'.",
-            "hck_GPT: RAM zajęty w {val}%. Jeśli spowalnia — wpisz 'optymalizacja' albo zamknij przeglądarkę.",
+            "hck_GPT: ⚠ RAM na {val}% - system może zaraz sięgnąć po plik wymiany. Wpisz 'dlaczego ram wysoki'.",
+            "hck_GPT: RAM zajęty w {val}%. Jeśli spowalnia - wpisz 'optymalizacja' albo zamknij przeglądarkę.",
         ],
         "en": [
-            "hck_GPT: ⚠ RAM at {val}% — system may hit the pagefile soon. Ask me 'why is ram high'.",
-            "hck_GPT: RAM at {val}%. If things feel sluggish — type 'optimization' or close the browser.",
+            "hck_GPT: ⚠ RAM at {val}% - system may hit the pagefile soon. Ask me 'why is ram high'.",
+            "hck_GPT: RAM at {val}%. If things feel sluggish - type 'optimization' or close the browser.",
         ],
     },
     "ram_crit": {
         "pl": [
             "hck_GPT: 🔴 RAM KRYTYCZNE {val}%! Możliwe spowolnienia lub crashe. Uruchom Flush RAM w Optimization.",
-            "hck_GPT: 🔴 RAM na {val}%! Zamknij zbędne programy TERAZ albo skorzystaj z TURBO → RAM Flush.",
+            "hck_GPT: 🔴 RAM na {val}%! Zamknij zbędne programy TERAZ albo skorzystaj z TURBO -> RAM Flush.",
         ],
         "en": [
             "hck_GPT: 🔴 RAM CRITICAL {val}%! Expect slowdowns or crashes. Run RAM Flush in Optimization.",
-            "hck_GPT: 🔴 RAM at {val}%! Close unused apps NOW, or use TURBO → RAM Flush.",
+            "hck_GPT: 🔴 RAM at {val}%! Close unused apps NOW, or use TURBO -> RAM Flush.",
         ],
     },
     "throttle": {
         "pl": [
-            "hck_GPT: ⚠ CPU throttluje — działa na {val}% mocy. Sprawdź temperatury ('temperatury').",
+            "hck_GPT: ⚠ CPU throttluje - działa na {val}% mocy. Sprawdź temperatury ('temperatury').",
             "hck_GPT: Dławienie CPU wykryte ({val}% mocy). Zwykle to przegrzanie. Wpisz 'temperatura'.",
         ],
         "en": [
-            "hck_GPT: ⚠ CPU throttling — running at {val}% of max power. Check temps ('temperatures').",
+            "hck_GPT: ⚠ CPU throttling - running at {val}% of max power. Check temps ('temperatures').",
             "hck_GPT: CPU power limit hit ({val}% of max). Heat is usually the cause. Type 'temperature'.",
         ],
     },
     "disk_low": {
         "pl": [
-            "hck_GPT: 💾 Dysk prawie pełny — tylko {val} GB wolne. Zakładka Optimization → wyczyść TEMP.",
+            "hck_GPT: 💾 Dysk prawie pełny - tylko {val} GB wolne. Zakładka Optimization -> wyczyść TEMP.",
             "hck_GPT: Mało miejsca na dysku: {val} GB. Wpisz 'disk speed' żeby zobaczyć pełny stan.",
         ],
         "en": [
-            "hck_GPT: 💾 Disk almost full — only {val} GB free. Optimization tab → clear TEMP folder.",
+            "hck_GPT: 💾 Disk almost full - only {val} GB free. Optimization tab -> clear TEMP folder.",
             "hck_GPT: Low disk space: {val} GB left. Type 'disk speed' for full disk status.",
         ],
     },
     "long_session": {
         "pl": [
-            "hck_GPT: Pracujesz już {val}h bez restartu. Wycieki pamięci mogą się zbierać — rozważ restart tej nocy.",
+            "hck_GPT: Pracujesz już {val}h bez restartu. Wycieki pamięci mogą się zbierać - rozważ restart tej nocy.",
             "hck_GPT: Sesja trwa {val}h. RAM Flush może pomóc jeśli coś spowalnia. Zakładka Optimization.",
         ],
         "en": [
-            "hck_GPT: {val}h uptime. Memory leaks may be building — consider a restart tonight.",
+            "hck_GPT: {val}h uptime. Memory leaks may be building - consider a restart tonight.",
             "hck_GPT: Running for {val}h. RAM Flush can help if things feel sluggish. Check Optimization tab.",
         ],
     },
     "all_clear": {
         "pl": [
-            "hck_GPT: ✓ System w normie — CPU i RAM OK.",
+            "hck_GPT: ✓ System w normie - CPU i RAM OK.",
             "hck_GPT: Spokojnie. Brak anomalii.",
             "hck_GPT: Wszystko gra.",
         ],
         "en": [
-            "hck_GPT: ✓ System healthy — CPU and RAM nominal.",
+            "hck_GPT: ✓ System healthy - CPU and RAM nominal.",
             "hck_GPT: All clear. No issues.",
             "hck_GPT: Looking good.",
         ],
@@ -141,15 +141,15 @@ _MSGS: dict[str, dict[str, list[str]]] = {
         "pl": [
             "hck_GPT: 🔍 Nowy proces: {val} zużywa dużo CPU. Wpisz 'co to {val}' jeśli nie wiesz co to.",
             "hck_GPT: ⚠ {val} wskoczył na listę top obciążeń. Normalnie go tu nie ma. Wpisz 'top procesy'.",
-            "hck_GPT: Wykryłem {val} — zużywa znaczną część CPU. Przypadkowe uruchomienie czy zaplanowane?",
+            "hck_GPT: Wykryłem {val} - zużywa znaczną część CPU. Przypadkowe uruchomienie czy zaplanowane?",
         ],
         "en": [
             "hck_GPT: 🔍 New heavy process: {val} appeared and is consuming a lot of CPU.",
-            "hck_GPT: ⚠ {val} just jumped onto the top load list — it doesn't usually show up here.",
+            "hck_GPT: ⚠ {val} just jumped onto the top load list - it doesn't usually show up here.",
             "hck_GPT: Spotted {val} using significant CPU. Normal activity, or something unexpected?",
         ],
     },
-    # Morning brief — first launch of the day
+    # Morning brief - first launch of the day
     "morning_brief": {
         "pl": [
             "hck_GPT: 🌅 Dzień dobry. System uruchomiony. Wpisz 'podsumowanie' by zobaczyć wczorajsze dane.",
@@ -162,7 +162,7 @@ _MSGS: dict[str, dict[str, list[str]]] = {
             "hck_GPT: Good morning! Monitoring since boot. Ask 'health check' for a quick status report.",
         ],
     },
-    # Sustained high temperature (not a spike — 15+ min)
+    # Sustained high temperature (not a spike - 15+ min)
     "temp_sustained": {
         "pl": [
             "hck_GPT: ⚠ CPU utrzymuje {val}°C od dłuższego czasu. Sprawdź czy chłodzenie działa poprawnie.",
@@ -177,22 +177,22 @@ _MSGS: dict[str, dict[str, list[str]]] = {
     "digest_suggestion": {
         "pl": [
             "hck_GPT: 💡 Jesteś aktywny od {val}h. Wpisz 'podsumowanie sesji' by zobaczyć jak szedł dzień.",
-            "hck_GPT: {val}h sesji za Tobą. Wpisz 'co się działo dzisiaj' — mam ciekawe dane do pokazania.",
+            "hck_GPT: {val}h sesji za Tobą. Wpisz 'co się działo dzisiaj' - mam ciekawe dane do pokazania.",
         ],
         "en": [
             "hck_GPT: 💡 You've been active for {val}h. Type 'session digest' to see how the day went.",
-            "hck_GPT: {val}h session. Ask me 'what happened today' — I have some interesting data for you.",
+            "hck_GPT: {val}h session. Ask me 'what happened today' - I have some interesting data for you.",
         ],
     },
     # GPU temperature spike alert
     "gpu_temp_spike": {
         "pl": [
             "hck_GPT: ⚠ Spike temperatury GPU do {val}°C. Sprawdź chłodzenie lub obniż ustawienia graficzne.",
-            "hck_GPT: GPU {val}°C — wysoko. Wpisz 'czy gpu się przegrzewa' po analizę.",
+            "hck_GPT: GPU {val}°C - wysoko. Wpisz 'czy gpu się przegrzewa' po analizę.",
         ],
         "en": [
             "hck_GPT: ⚠ GPU temperature spike to {val}°C. Check cooling or lower graphics settings.",
-            "hck_GPT: GPU at {val}°C — that's hot. Ask me 'is my gpu overheating' for analysis.",
+            "hck_GPT: GPU at {val}°C - that's hot. Ask me 'is my gpu overheating' for analysis.",
         ],
     },
 }
@@ -207,9 +207,9 @@ _IDLE_TIPS: dict[str, list[str]] = {
         "hck_GPT: 💡 Wiesz, że możesz zapytać 'jaki mam procesor' i podam Ci pełne dane?",
         "hck_GPT: 💡 Monitoruję Twój PC cicho w tle. Pisz jeśli chcesz coś sprawdzić.",
         "hck_GPT: 💡 Wpisz 'top procesy' by zobaczyć co teraz najbardziej obciąża system.",
-        "hck_GPT: 💡 Zapytaj 'co zmieniło się od wczoraj' — powiem Ci co nowego w systemie.",
+        "hck_GPT: 💡 Zapytaj 'co zmieniło się od wczoraj' - powiem Ci co nowego w systemie.",
         "hck_GPT: 💡 Startup Manager w zakładkach pokazuje co włącza się z Windowsem.",
-        "hck_GPT: 💡 Zapytaj 'zdrowie systemu' — odpowiem jedną, zwartą oceną.",
+        "hck_GPT: 💡 Zapytaj 'zdrowie systemu' - odpowiem jedną, zwartą oceną.",
         "hck_GPT: 💡 Uczę się Twoich wzorców. Im dłużej działa app, tym lepiej znam Twój PC.",
     ],
     "en": [
@@ -220,22 +220,22 @@ _IDLE_TIPS: dict[str, list[str]] = {
         "hck_GPT: 💡 You can ask 'what CPU do I have' and I'll give you full details.",
         "hck_GPT: 💡 I'm watching your PC silently. Ask me anything specific.",
         "hck_GPT: 💡 Type 'top processes' to see what's eating resources right now.",
-        "hck_GPT: 💡 Ask 'what changed since yesterday' — I track daily deltas.",
+        "hck_GPT: 💡 Ask 'what changed since yesterday' - I track daily deltas.",
         "hck_GPT: 💡 Startup Manager tab shows everything that boots with Windows.",
-        "hck_GPT: 💡 Ask 'health check' — I'll give you a single, clean verdict.",
+        "hck_GPT: 💡 Ask 'health check' - I'll give you a single, clean verdict.",
         "hck_GPT: 💡 I learn your usage patterns over time. The longer I run, the smarter I get.",
-        "hck_GPT: 💡 If I push a message and you're confused — just ask 'what does that mean'.",
+        "hck_GPT: 💡 If I push a message and you're confused - just ask 'what does that mean'.",
         # New 2025 tips
-        "hck_GPT: 💡 Before gaming: type 'game ready' — I'll check your system and suggest what to close.",
-        "hck_GPT: 💡 Ask 'is this normal?' after any reading that looks off — I'll compare it to your baseline.",
+        "hck_GPT: 💡 Before gaming: type 'game ready' - I'll check your system and suggest what to close.",
+        "hck_GPT: 💡 Ask 'is this normal?' after any reading that looks off - I'll compare it to your baseline.",
         "hck_GPT: 💡 TURBO has three modes: Gaming, Work, Economy. Ask 'turbo boost' to learn which fits you.",
         "hck_GPT: 💡 Ask 'thermal history' to see how temperatures behaved this session.",
         "hck_GPT: 💡 I can force-close unresponsive apps. Just ask 'kill [app name]'.",
-        "hck_GPT: 💡 Ask 'session digest' at the end of the day — I'll summarize CPU, RAM, and temps.",
+        "hck_GPT: 💡 Ask 'session digest' at the end of the day - I'll summarize CPU, RAM, and temps.",
         "hck_GPT: 💡 Wondering what's using your internet? Ask 'what is using my network'.",
-        "hck_GPT: 💡 Ask 'overclock check' — I'll tell you if your CPU or RAM is running above stock.",
-        "hck_GPT: 💡 RAM at 90%? Ask 'free up RAM' — I'll walk you through flushing standby memory.",
-        "hck_GPT: 💡 Ask 'what do you know about my PC' — I'll show you everything I've learned.",
+        "hck_GPT: 💡 Ask 'overclock check' - I'll tell you if your CPU or RAM is running above stock.",
+        "hck_GPT: 💡 RAM at 90%? Ask 'free up RAM' - I'll walk you through flushing standby memory.",
+        "hck_GPT: 💡 Ask 'what do you know about my PC' - I'll show you everything I've learned.",
     ],
 }
 
@@ -256,7 +256,7 @@ class ProactiveMonitor:
         self._running:   bool = False
 
         # State tracking
-        self._last_alert:  dict[str, float] = {}  # event_type → last sent ts
+        self._last_alert:  dict[str, float] = {}  # event_type -> last sent ts
         self._cpu_high_cnt: int = 0
         self._ram_crit_cnt: int = 0   # consecutive RAM-critical readings
         self._cpu_temp_high_cnt: int = 0  # consecutive high-temp readings
@@ -266,25 +266,25 @@ class ProactiveMonitor:
         self._morning_brief_sent = False
         self._idle_tip_idx = 0
 
-        # Problem anchor — tracks problems that were active so we can notify when resolved
+        # Problem anchor - tracks problems that were active so we can notify when resolved
         self._was_cpu_high:  bool = False
         self._was_ram_crit:  bool = False
         self._recovery_notified: dict[str, bool] = {}
 
-        # Process spike tracking — {proc_name: last_alert_ts}
+        # Process spike tracking - {proc_name: last_alert_ts}
         self._proc_spike_last: dict[str, float] = {}
 
-        # Session budget — CHI 2025: cap unsolicited alerts to avoid annoyance
+        # Session budget - CHI 2025: cap unsolicited alerts to avoid annoyance
         # Tracks timestamps of each push in a rolling 30-min window
         self._budget_log: List[float] = []
 
-        # User-active flag — set True when panel receives user input recently
+        # User-active flag - set True when panel receives user input recently
         # Allows softer alert tone when user is already in conversation
         self._user_active: bool = False
         self._user_active_until: float = 0.0
 
     def set_user_active(self) -> None:
-        """Call when user sends a message — suppresses redundant alerts for 5 min."""
+        """Call when user sends a message - suppresses redundant alerts for 5 min."""
         self._user_active = True
         self._user_active_until = time.time() + 300
 
@@ -324,7 +324,7 @@ class ProactiveMonitor:
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     def _loop(self) -> None:
-        # Initial delay — let the app fully load first
+        # Initial delay - let the app fully load first
         time.sleep(60)
         tip_counter = 0
 
@@ -363,12 +363,12 @@ class ProactiveMonitor:
                 if now_prune - v < 3600
             }
 
-        # Use interval=1 (was 2) — shorter blocking, still accurate enough
+        # Use interval=1 (was 2) - shorter blocking, still accurate enough
         cpu  = psutil.cpu_percent(interval=1)
         ram  = psutil.virtual_memory().percent
         freq = psutil.cpu_freq()
 
-        # CPU — require 2 consecutive high readings before alerting
+        # CPU - require 2 consecutive high readings before alerting
         if cpu >= CPU_CRIT_PCT:
             self._cpu_high_cnt += 1
             if self._cpu_high_cnt >= 2:
@@ -384,7 +384,7 @@ class ProactiveMonitor:
             else:
                 self._cpu_high_cnt = max(0, self._cpu_high_cnt - 1)
 
-        # RAM — normal high (immediate, single reading)
+        # RAM - normal high (immediate, single reading)
         if ram >= RAM_HIGH_PCT and ram < RAM_CRIT_PCT:
             self._alert("ram_high", f"{ram:.0f}")
 
@@ -394,7 +394,7 @@ class ProactiveMonitor:
             if ratio < THROTTLE_RATIO:
                 self._alert("throttle", f"{ratio*100:.0f}")
 
-        # Disk — Windows-safe: try system drive first, fallback to partitions
+        # Disk - Windows-safe: try system drive first, fallback to partitions
         try:
             import os
             system_drive = os.environ.get("SystemDrive", "C:") + "\\"
@@ -414,7 +414,7 @@ class ProactiveMonitor:
             except Exception:
                 pass
 
-        # RAM — sustained critical (2+ readings) gets stronger alert
+        # RAM - sustained critical (2+ readings) gets stronger alert
         if ram >= RAM_CRIT_PCT:
             self._ram_crit_cnt += 1
             if self._ram_crit_cnt >= 2:
@@ -441,7 +441,7 @@ class ProactiveMonitor:
         except Exception:
             pass
 
-        # Process anomaly — new heavy process detection
+        # Process anomaly - new heavy process detection
         try:
             import psutil as _ps
             now = time.time()
@@ -468,15 +468,15 @@ class ProactiveMonitor:
             self._session_long_alerted = True
             self._alert("long_session", f"{uptime_h:.0f}")
 
-        # ── Problem anchor — notify when issue resolves ───────────────────────
+        # ── Problem anchor - notify when issue resolves ───────────────────────
         if self._was_cpu_high and cpu < CPU_HIGH_PCT - 10:
             if not self._recovery_notified.get("cpu"):
                 self._recovery_notified["cpu"] = True
                 self._was_cpu_high = False
                 if lang := self._lang:
-                    msg = (f"hck_GPT: ✓ CPU wróciło do normy — teraz {cpu:.0f}%. Problem minął."
+                    msg = (f"hck_GPT: ✓ CPU wróciło do normy - teraz {cpu:.0f}%. Problem minął."
                            if lang == "pl" else
-                           f"hck_GPT: ✓ CPU back to normal — now {cpu:.0f}%. Problem resolved.")
+                           f"hck_GPT: ✓ CPU back to normal - now {cpu:.0f}%. Problem resolved.")
                     self._push(msg)
         elif cpu >= CPU_HIGH_PCT:
             self._was_cpu_high = True
@@ -487,9 +487,9 @@ class ProactiveMonitor:
                 self._recovery_notified["ram"] = True
                 self._was_ram_crit = False
                 if lang := self._lang:
-                    msg = (f"hck_GPT: ✓ RAM wróciło do normy — {ram:.0f}%. Świeżo po kryzysie."
+                    msg = (f"hck_GPT: ✓ RAM wróciło do normy - {ram:.0f}%. Świeżo po kryzysie."
                            if lang == "pl" else
-                           f"hck_GPT: ✓ RAM back to normal — {ram:.0f}%. Crisis over.")
+                           f"hck_GPT: ✓ RAM back to normal - {ram:.0f}%. Crisis over.")
                     self._push(msg)
         elif ram >= RAM_CRIT_PCT:
             self._was_ram_crit = True
@@ -501,7 +501,7 @@ class ProactiveMonitor:
     # ── Alert dispatch ────────────────────────────────────────────────────────
 
     def _budget_ok(self, urgent: bool = False) -> bool:
-        """Session budget check — CHI 2025: max 3 unsolicited alerts per 30-min window."""
+        """Session budget check - CHI 2025: max 3 unsolicited alerts per 30-min window."""
         if urgent:
             return True   # critical alerts always bypass budget
         now = time.time()
@@ -558,7 +558,7 @@ class ProactiveMonitor:
         except Exception:
             return
 
-        # Respect session budget — tips count toward the 30-min limit
+        # Respect session budget - tips count toward the 30-min limit
         if not self._budget_ok(urgent=False):
             return
 
@@ -584,19 +584,19 @@ class ProactiveMonitor:
             lang = self._lang
             if cpu >= CPU_HIGH_PCT:
                 if lang == "pl":
-                    status = f"CPU {cpu:.0f}% — wysokie obciążenie"
+                    status = f"CPU {cpu:.0f}% - wysokie obciążenie"
                 else:
-                    status = f"CPU {cpu:.0f}% — high load"
+                    status = f"CPU {cpu:.0f}% - high load"
             elif ram >= RAM_HIGH_PCT:
                 if lang == "pl":
-                    status = f"RAM {ram:.0f}% — mało wolnej pamięci"
+                    status = f"RAM {ram:.0f}% - mało wolnej pamięci"
                 else:
-                    status = f"RAM {ram:.0f}% — low memory"
+                    status = f"RAM {ram:.0f}% - low memory"
             else:
                 if lang == "pl":
-                    status = f"CPU {cpu:.0f}%  RAM {ram:.0f}%  — system OK"
+                    status = f"CPU {cpu:.0f}%  RAM {ram:.0f}%  - system OK"
                 else:
-                    status = f"CPU {cpu:.0f}%  RAM {ram:.0f}%  — system OK"
+                    status = f"CPU {cpu:.0f}%  RAM {ram:.0f}%  - system OK"
             self._banner_fn(status)
         except Exception:
             pass
