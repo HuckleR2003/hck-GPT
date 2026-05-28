@@ -1,6 +1,6 @@
 # hck_gpt/memory/user_knowledge.py
 """
-User Knowledge Base — SQLite-backed persistent store.
+User Knowledge Base - SQLite-backed persistent store.
 
 Tracks across ALL sessions:
   - hardware_profile  : CPU model, GPU, RAM, motherboard, OS, storage
@@ -266,7 +266,7 @@ class UserKnowledge:
     def reset_all(self) -> None:
         """
         Delete every row in all four tables and VACUUM the file.
-        Schema is preserved — tables still exist after the call.
+        Schema is preserved - tables still exist after the call.
         """
         with self._conn() as cx:
             cx.execute("DELETE FROM hardware_profile")
@@ -322,7 +322,7 @@ class UserKnowledge:
             for k, v in list(patterns.items())[:5]:
                 lines.append(f"  {k}: {v}")
 
-        return "\n".join(lines) if lines else "(knowledge base empty — run a hardware scan)"
+        return "\n".join(lines) if lines else "(knowledge base empty - run a hardware scan)"
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
