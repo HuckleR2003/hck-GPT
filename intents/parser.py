@@ -14,9 +14,9 @@ Algorithm:
   3. Score every intent against the token list and full text
      (multi-word phrases score higher)
   4. ML classifier blending:
-       ML conf >= 0.70  → ML result wins outright
-       ML conf 0.35–0.69 → 65% ML + 35% keyword blend
-       ML conf < 0.35   → pure keyword scoring (unchanged behaviour)
+       ML conf >= 0.70  -> ML result wins outright
+       ML conf 0.35–0.69 -> 65% ML + 35% keyword blend
+       ML conf < 0.35   -> pure keyword scoring (unchanged behaviour)
   5. Return the highest-scoring intent + all entities found
 """
 from __future__ import annotations
@@ -114,9 +114,9 @@ class IntentParser:
         Blends keyword score with ML classifier output.
 
         Returns (intent, confidence) pair using the tiered strategy:
-          ML conf >= 0.70  → ML wins outright
-          ML conf 0.35–0.69 → weighted blend
-          ML conf < 0.35   → keyword-only (unchanged)
+          ML conf >= 0.70  -> ML wins outright
+          ML conf 0.35–0.69 -> weighted blend
+          ML conf < 0.35   -> keyword-only (unchanged)
         """
         try:
             from hck_gpt.intents.ml_classifier import ml_classifier
@@ -126,17 +126,17 @@ class IntentParser:
             ml_intent, ml_conf = ml_classifier.predict(text)
 
             if ml_conf >= 0.70:
-                # ML is very confident — trust it outright
+                # ML is very confident - trust it outright
                 return ml_intent, ml_conf
 
             if ml_conf >= 0.35:
                 # Blend zone: 65% ML + 35% keyword
                 if ml_intent == kw_intent:
-                    # Agreement → boost
+                    # Agreement -> boost
                     blended = 0.65 * ml_conf + 0.35 * kw_conf
                     return ml_intent, min(1.0, blended)
                 else:
-                    # Disagreement → compare weighted scores, pick winner
+                    # Disagreement -> compare weighted scores, pick winner
                     ml_score  = 0.65 * ml_conf
                     kw_score  = 0.35 * kw_conf
                     if ml_score >= kw_score:
@@ -145,20 +145,20 @@ class IntentParser:
                         return kw_intent, min(1.0, kw_score + 0.15 * ml_score)
 
         except Exception:
-            pass  # ML unavailable → fall through to keyword
+            pass  # ML unavailable -> fall through to keyword
 
         return kw_intent, kw_conf
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    # Polish accent normalization map (typed without diacritics → with)
+    # Polish accent normalization map (typed without diacritics -> with)
     _PL_ACCENT = str.maketrans(
         "aeosnzcl",
-        "aeosnzcl",   # identity — real mapping done via replace below
+        "aeosnzcl",   # identity - real mapping done via replace below
     )
 
     _ACCENT_MAP = [
-        # without → with (most common user typos / accent-stripped input)
+        # without -> with (most common user typos / accent-stripped input)
         ("specyfikacje", "specyfikacja"),
         ("wydajnosc",    "wydajność"),
         ("pamieci",      "pamięci"),
@@ -185,14 +185,14 @@ class IntentParser:
         """
         import unicodedata
         # Build full normalization: strip diacritics from BOTH text and patterns
-        # → compare in ASCII-folded space
+        # -> compare in ASCII-folded space
         # (Implemented by also accent-folding vocabulary patterns in scoring)
         for stripped, accented in self._ACCENT_MAP:
             text = text.replace(stripped, accented)
         return text
 
     def _ascii_fold(self, text: str) -> str:
-        """Remove diacritics for fuzzy matching (ą→a, ę→e, etc.)."""
+        """Remove diacritics for fuzzy matching (ą->a, ę->e, etc.)."""
         import unicodedata
         return "".join(
             c for c in unicodedata.normalize("NFD", text)
@@ -211,7 +211,7 @@ class IntentParser:
         score = 0.0
         for pattern in patterns:
             if " " in pattern:
-                # Multi-word phrase → higher reward, check in full text
+                # Multi-word phrase -> higher reward, check in full text
                 if pattern in full_text:
                     score += len(pattern.split()) * 1.5
             else:
@@ -233,7 +233,7 @@ class IntentParser:
         return score
 
     def _edit_distance(self, s1: str, s2: str) -> int:
-        """Levenshtein distance — fast 1-row DP, early exit if delta > 2."""
+        """Levenshtein distance - fast 1-row DP, early exit if delta > 2."""
         if abs(len(s1) - len(s2)) > 2:
             return 99
         m, n = len(s1), len(s2)
