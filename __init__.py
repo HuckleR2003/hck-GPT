@@ -1,14 +1,4 @@
-# hck_gpt/__init__.py
-"""
-hck_GPT - AI Assistant for PC Workman
-Provides system optimization and intelligent suggestions
-"""
+# hck_gpt/engine - Hybrid AI engine (rule-based + local LLM)
+from .hybrid_engine import hybrid_engine
 
-from .chat_handler import ChatHandler
-from .service_setup_wizard import ServiceSetupWizard
-from .services_manager import ServicesManager
-from .panel import HCKGPTPanel
-from .insights import InsightsEngine
-
-__version__ = "1.0.0"
-__all__ = ["ChatHandler", "ServiceSetupWizard", "ServicesManager", "HCKGPTPanel", "InsightsEngine"]
+__all__ = ["hybrid_engine"]
