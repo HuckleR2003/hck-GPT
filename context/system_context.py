@@ -129,6 +129,35 @@ class SystemContext:
         except Exception:
             pass
 
+        # ── Hardware-sensor temperatures (LibreHardwareMonitor via core) ───────
+        # psutil.sensors_temperatures() is usually empty on Windows.
+        # core.hardware_sensors has a proper driver-backed implementation.
+        try:
+            from core.hardware_sensors import get_cpu_temp, get_gpu_temp
+            cpu_t = get_cpu_temp()
+            gpu_t = get_gpu_temp()
+            if cpu_t:
+                ctx["cpu_temp"] = round(float(cpu_t), 1)
+                # Enrich or replace the psutil temperatures list so the
+                # LLM context always shows at least CPU/GPU readings.
+                existing = ctx.get("temperatures", [])
+                has_cpu_entry = any("cpu" in lbl.lower() or "package" in lbl.lower()
+                                    for lbl, _ in existing)
+                if not has_cpu_entry:
+                    ctx.setdefault("temperatures", []).insert(
+                        0, ("CPU Package", round(float(cpu_t), 1))
+                    )
+            if gpu_t:
+                ctx["gpu_temp"] = round(float(gpu_t), 1)
+                existing = ctx.get("temperatures", [])
+                has_gpu_entry = any("gpu" in lbl.lower() for lbl, _ in existing)
+                if not has_gpu_entry:
+                    ctx.setdefault("temperatures", []).append(
+                        ("GPU Core", round(float(gpu_t), 1))
+                    )
+        except Exception:
+            pass
+
         # ── Today's averages from stats engine ─────────────────────────────────
         try:
             from hck_stats_engine.query_api import query_api
@@ -189,9 +218,10 @@ class SystemContext:
         lines = ["[PC State]"]
 
         if "cpu_pct" in snap:
-            mhz = f" @ {snap['cpu_mhz']} MHz" if snap.get("cpu_mhz") else ""
-            thr = "  ⚠ throttled" if snap.get("cpu_throttled") else ""
-            lines.append(f"CPU: {snap['cpu_pct']:.0f}%{mhz}{thr}")
+            mhz  = f" @ {snap['cpu_mhz']} MHz" if snap.get("cpu_mhz") else ""
+            thr  = "  ⚠ throttled"              if snap.get("cpu_throttled") else ""
+            temp = f"  {snap['cpu_temp']}°C"    if snap.get("cpu_temp") else ""
+            lines.append(f"CPU: {snap['cpu_pct']:.0f}%{mhz}{temp}{thr}")
 
         if "ram_pct" in snap:
             lines.append(
@@ -199,6 +229,9 @@ class SystemContext:
                 f"  ({snap.get('ram_used_gb','?')}"
                 f" / {snap.get('ram_total_gb','?')} GB)"
             )
+
+        if snap.get("gpu_temp") is not None:
+            lines.append(f"GPU temp: {snap['gpu_temp']}°C")
 
         if snap.get("cpu_avg_today") is not None:
             lines.append(
