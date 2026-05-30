@@ -1203,6 +1203,13 @@ class ResponseBuilder:
         "{P} Pytaj o PC - w tym jestem dobry. Na filozofię masz Google.",
         "{P} Funkcjonuję. CPU {cpu}%, RAM {ram}%. Ty jak?",
         "{P} Monitoruję wszystko po cichu. Jak chcesz wiedzieć co się dzieje - pytaj.",
+        # Extended personality pool
+        "{P} CPU {cpu}%, RAM {ram}%. Wszystko w normie. Mam nadzieję że u Ciebie tak samo.",
+        "{P} Jestem tu, w tle, cały czas. Twój PC mi nie ucieka - CPU {cpu}%, RAM {ram}%.",
+        "{P} Small talk to nie moja specjalność, ale PC? Na tym znam się świetnie. Pytaj.",
+        "{P} Działam na CPU {cpu}% i RAM {ram}%. Twój komputer spokojny. Pytaj kiedy chcesz.",
+        "{P} Monitoruję, uczę się, nic nie umyka. CPU {cpu}%, RAM {ram}%. Co Cię interesuje?",
+        "{P} Cieszę się że piszesz. CPU {cpu}%, RAM {ram}% - wszystko OK. Co sprawdzamy?",
     ]
     _SMALLTALK_EN = [
         "{P} Fine, thanks. Your PC is at {cpu}% CPU and {ram}% RAM - not bad for small talk.",
@@ -1210,6 +1217,13 @@ class ResponseBuilder:
         "{P} Ask me about your PC - that's my lane. For philosophy, try Google.",
         "{P} Running. CPU {cpu}%, RAM {ram}%. You?",
         "{P} Monitoring everything quietly. Ask if you want to know what's going on.",
+        # Extended personality pool
+        "{P} CPU {cpu}%, RAM {ram}%. All nominal. Hope the same goes for you.",
+        "{P} Here in the background, always. PC isn't going anywhere - CPU {cpu}%, RAM {ram}%.",
+        "{P} Small talk's not my thing, but PC hardware? That's exactly my thing. Ask away.",
+        "{P} Running at CPU {cpu}%, RAM {ram}%. Your machine is calm. What do you want to check?",
+        "{P} Still here, still watching. CPU {cpu}%, RAM {ram}% - nothing unusual. What's on your mind?",
+        "{P} Good to hear from you. CPU {cpu}%, RAM {ram}% - everything's fine. What shall we look at?",
     ]
 
     def _resp_small_talk(self, r: ParseResult, lang: str = "pl") -> List[str]:
@@ -1228,26 +1242,30 @@ class ResponseBuilder:
     def _resp_about_program(self, r: ParseResult, lang: str = "pl") -> List[str]:
         if lang == "en":
             return [
-                f"{self.PREFIX} About PC Workman HCK v1.7.3:",
+                f"{self.PREFIX} About PC Workman HCK v1.7.6:",
                 "  A real-time PC monitoring and optimization tool.",
                 "  • Live CPU / RAM / GPU tracking with history graphs",
-                "  • hck_GPT - AI assistant answering hardware questions",
+                "  • hck_GPT - AI assistant (82 intents, bilingual PL/EN, Ollama-ready)",
                 "  • Stats engine - daily/weekly usage database (SQLite)",
                 "  • Optimization Center - one-click TURBO BOOST, RAM flush",
                 "  • Fan control editor, stability tests, hardware sensors",
-                "  • Process library - identifies 100+ running programs",
-                "  💬 Try: 'specs'  'health'  'temperatures'  'stats'",
+                "  • DeepMonitor - HWMonitor-style sensor table (all temps, voltages, clocks)",
+                "  • MAP OF COMPONENTS - 2.5D isometric live PC hardware visualization",
+                "  • Process library - identifies 370+ running programs & games",
+                "  💬 Try: 'specs'  'health'  'temperatures'  'stats'  'help'",
             ]
         return [
-            f"{self.PREFIX} O programie PC Workman HCK v1.7.3:",
+            f"{self.PREFIX} O programie PC Workman HCK v1.7.6:",
             "  Narzędzie do monitorowania i optymalizacji PC w czasie rzeczywistym.",
             "  • Śledzenie CPU / RAM / GPU na żywo z wykresami historii",
-            "  • hck_GPT - asystent AI odpowiadający na pytania o sprzęt",
+            "  • hck_GPT - asystent AI (82 intenty, PL/EN, gotowy na Ollama)",
             "  • Silnik statystyk - baza danych użytkowania (SQLite)",
             "  • Centrum optymalizacji - TURBO BOOST jednym kliknięciem, flush RAM",
             "  • Edytor krzywej wentylatora, testy stabilności, czujniki sprzętu",
-            "  • Biblioteka procesów - identyfikuje 100+ działających programów",
-            "  💬 Spróbuj: 'specyfikacja'  'zdrowie'  'temperatury'  'stats'",
+            "  • DeepMonitor - tabela sensorów w stylu HWMonitor (tempy, napięcia, takty)",
+            "  • MAP OF COMPONENTS - izometryczny widok 2.5D na żywo całego PC",
+            "  • Biblioteka procesów - identyfikuje 370+ programów i gier",
+            "  💬 Spróbuj: 'specyfikacja'  'zdrowie'  'temperatury'  'stats'  'help'",
         ]
 
     # ── About the author ──────────────────────────────────────────────────────
@@ -5454,6 +5472,169 @@ class ResponseBuilder:
             "  💡 Duże I/O nie znaczy problem - to mogą być aktualizacje lub indeksowanie.",
             "  💡 High disk I/O isn't always a problem - it may be updates or indexing."))
         lines.append(_followup("process", lang))
+        return lines
+
+
+    # ── Greeting response (via intent or direct routing) ─────────────────────
+
+    _GREET_INTROS_PL = [
+        "{P} Cześć! Monitoruję Twój PC. CPU {cpu}%, RAM {ram}%. Co sprawdzamy?",
+        "{P} Hej! Jestem tu i obserwuję. CPU {cpu}%, RAM {ram}%. Czym mogę pomóc?",
+        "{P} Witaj! System spokojny - CPU {cpu}%, RAM {ram}%. Pytaj o co chcesz.",
+        "{P} Hejka! Gotowy. CPU {cpu}%, RAM {ram}%. Zacznij od 'specs' lub 'zdrowie'.",
+    ]
+    _GREET_INTROS_EN = [
+        "{P} Hey! Monitoring your PC. CPU {cpu}%, RAM {ram}%. What shall we check?",
+        "{P} Hi! Here and watching. CPU {cpu}%, RAM {ram}%. How can I help?",
+        "{P} Welcome! System calm - CPU {cpu}%, RAM {ram}%. Ask away.",
+        "{P} Hello! Ready. CPU {cpu}%, RAM {ram}%. Start with 'specs' or 'health'.",
+    ]
+
+    def _resp_greeting(self, r: ParseResult, lang: str = "pl") -> List[str]:
+        try:
+            from hck_gpt.context.system_context import system_context
+            snap = system_context.snapshot()
+            cpu = f"{snap.get('cpu_pct', 0) or 0:.0f}"
+            ram = f"{snap.get('ram_pct', 0) or 0:.0f}"
+        except Exception:
+            cpu, ram = "?", "?"
+        pool = self._GREET_INTROS_EN if lang == "en" else self._GREET_INTROS_PL
+        resp = self._pick_fresh("greeting", lang, self._GREET_INTROS_PL, self._GREET_INTROS_EN)
+        return [resp.replace("{P}", self.PREFIX).replace("{cpu}", cpu).replace("{ram}", ram)]
+
+    # ── Thanks response ────────────────────────────────────────────────────────
+
+    _THANKS_PL = [
+        "{P} Spoko! Monitoruję dalej. Wróć jak będziesz potrzebował.",
+        "{P} Nie ma za co. Czujki działają, dane lecą. Pytaj kiedy chcesz.",
+        "{P} Zawsze do usług. Wpisz 'help' kiedy zapomnisz co potrafię.",
+        "{P} Okej! Pilnuję systemu. Daj znać jak coś się zmieni.",
+    ]
+    _THANKS_EN = [
+        "{P} Sure! Still monitoring. Come back whenever.",
+        "{P} No problem. Sensors running, data flowing. Ask anytime.",
+        "{P} Anytime. Type 'help' if you forget what I can do.",
+        "{P} All good! Watching the system. Let me know if anything changes.",
+    ]
+
+    def _resp_thanks(self, r: ParseResult, lang: str = "pl") -> List[str]:
+        resp = self._pick_fresh("thanks", lang, self._THANKS_PL, self._THANKS_EN)
+        return [resp.replace("{P}", self.PREFIX)]
+
+    # ── Health check (live context-enriched) ──────────────────────────────────
+
+    def _resp_health_check(self, r: ParseResult, lang: str = "pl") -> List[str]:
+        """
+        Comprehensive health overview: live metrics, temps, throttle, disk.
+        Gives an overall verdict with actionable follow-ups.
+        """
+        from hck_gpt.context.system_context import system_context
+        from hck_gpt.memory.user_knowledge  import user_knowledge
+        snap     = system_context.snapshot()
+        patterns = user_knowledge.get_all_patterns()
+
+        cpu  = float(snap.get("cpu_pct",  0) or 0)
+        ram  = float(snap.get("ram_pct",  0) or 0)
+        cpu_t = snap.get("cpu_temp")
+        gpu_t = snap.get("gpu_temp")
+        disk_free = snap.get("disk_free_gb", 0) or 0
+        throttled = snap.get("cpu_throttled", False)
+
+        # Score-based health verdict
+        score = 100
+        issues: List[str] = []
+        tips:   List[str] = []
+
+        if cpu > 90:
+            score -= 25; issues.append(_t(lang, "CPU krytycznie wysoki", "CPU critically high"))
+        elif cpu > 75:
+            score -= 12; issues.append(_t(lang, "CPU podwyższony", "CPU elevated"))
+
+        if ram > 90:
+            score -= 25; issues.append(_t(lang, "RAM krytycznie zajęty", "RAM critically full"))
+        elif ram > 80:
+            score -= 12; issues.append(_t(lang, "RAM wysoki", "RAM high"))
+
+        if cpu_t and cpu_t > 88:
+            score -= 20; issues.append(_t(lang, f"CPU przegrzany ({cpu_t:.0f}°C)", f"CPU overheating ({cpu_t:.0f}°C)"))
+        elif cpu_t and cpu_t > 78:
+            score -= 8;  issues.append(_t(lang, f"CPU ciepły ({cpu_t:.0f}°C)", f"CPU warm ({cpu_t:.0f}°C)"))
+
+        if gpu_t and gpu_t > 90:
+            score -= 15; issues.append(_t(lang, f"GPU przegrzany ({gpu_t:.0f}°C)", f"GPU overheating ({gpu_t:.0f}°C)"))
+        elif gpu_t and gpu_t > 80:
+            score -= 8;  issues.append(_t(lang, f"GPU ciepły ({gpu_t:.0f}°C)", f"GPU warm ({gpu_t:.0f}°C)"))
+
+        if throttled:
+            score -= 15; issues.append(_t(lang, "CPU throttluje", "CPU throttling"))
+
+        if disk_free < 5:
+            score -= 20; issues.append(_t(lang, f"Dysk prawie pełny ({disk_free:.0f} GB wolne)", f"Disk nearly full ({disk_free:.0f} GB free)"))
+        elif disk_free < 15:
+            score -= 8;  issues.append(_t(lang, f"Mało miejsca na dysku ({disk_free:.0f} GB)", f"Low disk space ({disk_free:.0f} GB free)"))
+
+        score = max(0, score)
+
+        # Verdict
+        if score >= 90:
+            verdict = _t(lang, "DOSKONAŁY", "EXCELLENT")
+            verdict_sym = "✓"
+        elif score >= 75:
+            verdict = _t(lang, "DOBRY", "GOOD")
+            verdict_sym = "✓"
+        elif score >= 55:
+            verdict = _t(lang, "PRZECIĘTNY", "FAIR")
+            verdict_sym = "!"
+        else:
+            verdict = _t(lang, "KRYTYCZNY", "CRITICAL")
+            verdict_sym = "⚠"
+
+        lines = [_t(lang,
+            f"{self.PREFIX} Stan zdrowia systemu  [{verdict_sym} {verdict}  {score}/100]",
+            f"{self.PREFIX} System health  [{verdict_sym} {verdict}  {score}/100]")]
+        lines.append("")
+
+        # Live metrics row
+        temp_str = ""
+        if cpu_t:
+            temp_str += f"  {cpu_t:.0f}°C CPU"
+        if gpu_t:
+            temp_str += f"  {gpu_t:.0f}°C GPU"
+        lines.append(f"  CPU {cpu:.0f}%   RAM {ram:.0f}%{temp_str}")
+        if snap.get("cpu_mhz") and snap.get("cpu_max_mhz"):
+            ratio = snap["cpu_mhz"] / snap["cpu_max_mhz"] * 100
+            if ratio < 75:
+                lines.append(_t(lang,
+                    f"  Taktowanie: {snap['cpu_mhz']} MHz  ({ratio:.0f}% mocy)",
+                    f"  Freq: {snap['cpu_mhz']} MHz  ({ratio:.0f}% of max)"))
+
+        # Issues
+        if issues:
+            lines.append("")
+            lines.append(_t(lang, "  Znalezione problemy:", "  Issues detected:"))
+            for iss in issues:
+                lines.append(f"  • {iss}")
+
+        # Typical vs now comparison
+        typ_cpu = float(patterns.get("typical_cpu_avg") or 0)
+        if typ_cpu > 0 and abs(cpu - typ_cpu) > 10:
+            delta = cpu - typ_cpu
+            sign = "+" if delta > 0 else ""
+            lines.append(_t(lang,
+                f"  CPU teraz {sign}{delta:.0f}% vs Twoja norma ({typ_cpu:.0f}%)",
+                f"  CPU now {sign}{delta:.0f}% vs your typical ({typ_cpu:.0f}%)"))
+
+        # Tips
+        lines.append("")
+        if score < 75:
+            lines.append(_t(lang,
+                "  💬 Rekomendowane: 'optymalizacja' · 'top procesy' · 'temperatura'",
+                "  💬 Recommended: 'optimization' · 'top processes' · 'temperature'"))
+        else:
+            lines.append(_t(lang,
+                "  💬 Sprawdź: 'stats' · 'temperatura' · 'specs'",
+                "  💬 Check: 'stats' · 'temperature' · 'specs'"))
+
         return lines
 
 
