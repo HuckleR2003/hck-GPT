@@ -28,6 +28,7 @@ import threading
 import time
 import random
 from typing import Callable, List, Optional
+from import_core import register_component, update_status, STATUS_OK, STATUS_STARTING
 
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
@@ -47,6 +48,15 @@ SESSION_WINDOW_S    = 1800   # 30-minute window
 # Process anomaly - new heavy process threshold
 PROC_SPIKE_PCT      = 30.0   # single process using >30% CPU -> spike alert
 PROC_SPIKE_MIN_GAP  = 600    # 10 min cooldown per process name
+
+# DeepMonitor thresholds
+DM_CPU_TEMP_WARN    = 80.0   # CPU temp warning threshold (°C)
+DM_CPU_TEMP_CRIT    = 90.0   # CPU temp critical threshold (°C)
+DM_GPU_TEMP_WARN    = 82.0   # GPU temp warning threshold (°C)
+DM_GPU_TEMP_CRIT    = 92.0   # GPU temp critical threshold (°C)
+DM_CPU_FREQ_DROP    = 0.55   # CPU freq below 55% of max = severe throttle
+DM_MULTI_DISK_LOW   = 8.0    # GB free - check ALL drives, not just C:
+DM_CHECK_INTERVAL   = 3      # run DeepMonitor check every N main checks (~2 min)
 
 
 # ── Message pools - PL + EN ───────────────────────────────────────────────────
@@ -195,6 +205,77 @@ _MSGS: dict[str, dict[str, list[str]]] = {
             "hck_GPT: GPU at {val}°C - that's hot. Ask me 'is my gpu overheating' for analysis.",
         ],
     },
+    # ── DeepMonitor-sourced alerts ────────────────────────────────────────────
+    "cpu_temp_warn": {
+        "pl": [
+            "hck_GPT: 🌡 CPU {val}°C - podwyższona temperatura. Sprawdź czy pasta termoprzewodząca jest świeża.",
+            "hck_GPT: Temperatura CPU: {val}°C. Jeśli to normalna praca, rozważ czyszczenie chłodzenia.",
+        ],
+        "en": [
+            "hck_GPT: 🌡 CPU at {val}°C - elevated temperature. Check if thermal paste needs replacing.",
+            "hck_GPT: CPU temp: {val}°C. If under normal load, consider cleaning your cooler.",
+        ],
+    },
+    "cpu_temp_crit": {
+        "pl": [
+            "hck_GPT: 🔴 CPU KRYTYCZNE {val}°C! Ryzyko throttlowania lub uszkodzenia. Sprawdź chłodzenie TERAZ.",
+            "hck_GPT: 🔴 CPU przegrzany: {val}°C! Wyłącz ciężkie zadania i sprawdź wentylator / pastę.",
+        ],
+        "en": [
+            "hck_GPT: 🔴 CPU CRITICAL {val}°C! Risk of throttling or hardware damage. Check cooling NOW.",
+            "hck_GPT: 🔴 CPU overheating at {val}°C! Stop heavy tasks and inspect fan/thermal paste.",
+        ],
+    },
+    "gpu_temp_warn": {
+        "pl": [
+            "hck_GPT: 🌡 GPU {val}°C - przekroczono próg ostrzegawczy. Sprawdź wentylator karty graficznej.",
+            "hck_GPT: GPU {val}°C - wyższa temperatura niż typowe. Czy kratka obudowy jest odkurzona?",
+        ],
+        "en": [
+            "hck_GPT: 🌡 GPU at {val}°C - warning threshold exceeded. Check GPU fan curve.",
+            "hck_GPT: GPU {val}°C - higher than typical. Is your case intake clear of dust?",
+        ],
+    },
+    "gpu_temp_crit": {
+        "pl": [
+            "hck_GPT: 🔴 GPU KRYTYCZNE {val}°C! Karta graficzna może się throttlować lub wyłączyć.",
+            "hck_GPT: 🔴 GPU przegrzany: {val}°C! Obniż oprawę graficzną lub sprawdź przepływ powietrza.",
+        ],
+        "en": [
+            "hck_GPT: 🔴 GPU CRITICAL {val}°C! Card may throttle or emergency shutdown.",
+            "hck_GPT: 🔴 GPU overheating at {val}°C! Lower graphics settings or improve airflow.",
+        ],
+    },
+    "multi_disk_low": {
+        "pl": [
+            "hck_GPT: 💾 Dysk {val} ma mało miejsca. Sprawdź zakładkę Optymalizacja -> wyczyść tymczasowe.",
+            "hck_GPT: Uwaga: {val} jest prawie pełny. Przenieś duże pliki lub usuń nieużywane aplikacje.",
+        ],
+        "en": [
+            "hck_GPT: 💾 Drive {val} is running low on space. Check Optimization -> clear temp files.",
+            "hck_GPT: Warning: {val} is nearly full. Move large files or uninstall unused apps.",
+        ],
+    },
+    "cpu_freq_severe": {
+        "pl": [
+            "hck_GPT: ⚠ CPU działa tylko na {val}% mocy! Silne throttlowanie - sprawdź temperatury i plan zasilania.",
+            "hck_GPT: Procesor dławiony do {val}% mocy. Przyczyną może być przegrzanie lub limit zasilania.",
+        ],
+        "en": [
+            "hck_GPT: ⚠ CPU running at only {val}% of max power! Severe throttling - check temps and power plan.",
+            "hck_GPT: CPU throttled to {val}% power. Likely cause: overheating or power limit.",
+        ],
+    },
+    "sensor_health_insight": {
+        "pl": [
+            "hck_GPT: ✓ DeepMonitor: CPU {val}. Wszystkie sensory w normie.",
+            "hck_GPT: 📊 Raport sensorów: {val}. System pod kontrolą.",
+        ],
+        "en": [
+            "hck_GPT: ✓ DeepMonitor: CPU {val}. All sensors nominal.",
+            "hck_GPT: 📊 Sensor report: {val}. System under control.",
+        ],
+    },
 }
 
 # Periodic tips shown when system is idle/healthy
@@ -211,6 +292,20 @@ _IDLE_TIPS: dict[str, list[str]] = {
         "hck_GPT: 💡 Startup Manager w zakładkach pokazuje co włącza się z Windowsem.",
         "hck_GPT: 💡 Zapytaj 'zdrowie systemu' - odpowiem jedną, zwartą oceną.",
         "hck_GPT: 💡 Uczę się Twoich wzorców. Im dłużej działa app, tym lepiej znam Twój PC.",
+        # Nowe wskazówki 2025 PL
+        "hck_GPT: 💡 Przed graniem: wpisz 'gotowy do gry' - sprawdzę system i podpowiem co zamknąć.",
+        "hck_GPT: 💡 Zapytaj 'to normalne?' po każdym wyniku który wygląda dziwnie - porównam z Twoją normą.",
+        "hck_GPT: 💡 TURBO ma 3 tryby: Gaming, Work, Economy. Wpisz 'turbo boost' by wybrać właściwy.",
+        "hck_GPT: 💡 Zapytaj 'historia temperatur' by zobaczyć jak się zachowywało ciepło w tej sesji.",
+        "hck_GPT: 💡 Mogę wymusić zamknięcie niereagującego programu. Napisz 'kill [nazwa]'.",
+        "hck_GPT: 💡 Zapytaj 'podsumowanie sesji' na koniec dnia - zestawię CPU, RAM i temperatury.",
+        "hck_GPT: 💡 Ciekawi Cię co zjada internet? Wpisz 'co używa sieci'.",
+        "hck_GPT: 💡 RAM na 90%? Wpisz 'zwolnij pamięć' - przeprowadzę Cię przez czyszczenie.",
+        "hck_GPT: 💡 Zakładka MAP OF COMPONENTS pokazuje Twój PC jako schemat 2.5D z danymi na żywo.",
+        "hck_GPT: 💡 Wpisz 'raport zdrowia' - podam ocenę liczbową każdego podzespołu.",
+        "hck_GPT: 💡 Zapytaj 'kiedy ostatni restart' - sprawdzę uptime i ocenię czy warto zrestartować.",
+        "hck_GPT: 💡 Wpisz 'co wiesz o moim PC' - pokażę wszystko co zebrałem o Twoim sprzęcie.",
+        "hck_GPT: 💡 Temperatura CPU przekracza 80°C? Zapytaj 'czy CPU jest zbyt gorące' - ocenię sytuację.",
     ],
     "en": [
         "hck_GPT: 💡 AllMonitor tab shows historical min/max for each resource.",
@@ -250,6 +345,7 @@ class ProactiveMonitor:
 
     def __init__(self) -> None:
         self._push_fn:   Optional[Callable[[str], None]] = None
+        register_component("hck_gpt.proactive_monitor", self, STATUS_OK)
         self._banner_fn: Optional[Callable[[str], None]] = None
         self._lang:      str  = "en"   # matches panel default; updated on first user message
         self._thread:    Optional[threading.Thread] = None
@@ -282,6 +378,12 @@ class ProactiveMonitor:
         # Allows softer alert tone when user is already in conversation
         self._user_active: bool = False
         self._user_active_until: float = 0.0
+
+        # DeepMonitor state
+        self._dm_check_tick: int = 0         # counter: run DM check every DM_CHECK_INTERVAL main cycles
+        self._dm_cpu_temp_crit_cnt: int = 0  # consecutive CPU critical temp readings
+        self._dm_gpu_temp_crit_cnt: int = 0  # consecutive GPU critical temp readings
+        self._dm_healthy_report_due: bool = True  # send one "all clear" after issues resolve
 
     def set_user_active(self) -> None:
         """Call when user sends a message - suppresses redundant alerts for 5 min."""
@@ -335,6 +437,10 @@ class ProactiveMonitor:
             try:
                 self._check_system()
                 tip_counter += 1
+                self._dm_check_tick += 1
+                # DeepMonitor sensor check every 3 main cycles (~2 min 15 sec)
+                if self._dm_check_tick % DM_CHECK_INTERVAL == 0:
+                    self._check_deepmonitor()
                 # Show idle tip every ~8 checks (~6 min) when system is healthy
                 if tip_counter % 8 == 0:
                     self._maybe_idle_tip()
@@ -582,21 +688,42 @@ class ProactiveMonitor:
             return
         try:
             lang = self._lang
-            if cpu >= CPU_HIGH_PCT:
-                if lang == "pl":
-                    status = f"CPU {cpu:.0f}% - wysokie obciążenie"
-                else:
-                    status = f"CPU {cpu:.0f}% - high load"
+
+            # Collect temperatures for banner (best-effort, non-blocking)
+            temp_str = ""
+            try:
+                from core.hardware_sensors import get_cpu_temp, get_gpu_temp
+                ct = get_cpu_temp()
+                gt = get_gpu_temp()
+                parts = []
+                if ct:
+                    parts.append(f"CPU {ct:.0f}°C")
+                if gt:
+                    parts.append(f"GPU {gt:.0f}°C")
+                if parts:
+                    temp_str = "  " + "  ".join(parts)
+            except Exception:
+                pass
+
+            if cpu >= CPU_CRIT_PCT:
+                status = (f"⚠ CPU KRYTYCZNE {cpu:.0f}%{temp_str}"
+                          if lang == "pl" else
+                          f"⚠ CPU CRITICAL {cpu:.0f}%{temp_str}")
+            elif cpu >= CPU_HIGH_PCT:
+                status = (f"CPU {cpu:.0f}% - wysokie{temp_str}"
+                          if lang == "pl" else
+                          f"CPU {cpu:.0f}% - high load{temp_str}")
+            elif ram >= RAM_CRIT_PCT:
+                status = (f"⚠ RAM KRYTYCZNE {ram:.0f}%{temp_str}"
+                          if lang == "pl" else
+                          f"⚠ RAM CRITICAL {ram:.0f}%{temp_str}")
             elif ram >= RAM_HIGH_PCT:
-                if lang == "pl":
-                    status = f"RAM {ram:.0f}% - mało wolnej pamięci"
-                else:
-                    status = f"RAM {ram:.0f}% - low memory"
+                status = (f"RAM {ram:.0f}% - mało pamięci{temp_str}"
+                          if lang == "pl" else
+                          f"RAM {ram:.0f}% - low memory{temp_str}")
             else:
-                if lang == "pl":
-                    status = f"CPU {cpu:.0f}%  RAM {ram:.0f}%  - system OK"
-                else:
-                    status = f"CPU {cpu:.0f}%  RAM {ram:.0f}%  - system OK"
+                status = f"CPU {cpu:.0f}%  RAM {ram:.0f}%{temp_str}  - OK"
+
             self._banner_fn(status)
         except Exception:
             pass
@@ -645,6 +772,128 @@ class ProactiveMonitor:
         if pool:
             msg = random.choice(pool).format(val=f"{uptime_h:.0f}")
             self._push(msg)
+
+    # ── DeepMonitor deep-sensor check ─────────────────────────────────────────
+
+    def _check_deepmonitor(self) -> None:
+        """
+        Rich hardware check powered by LibreHardwareMonitor sensor data
+        (the same data source as DeepMonitor / pro_info_table).
+        Monitors: CPU/GPU temperature trends, severe throttling, multi-drive
+        disk space, and fires contextual bilingual alerts.
+        """
+        try:
+            from core.hardware_sensors import get_cpu_temp, get_gpu_temp
+        except ImportError:
+            return
+
+        cpu_temp = gpu_temp = cpu_mhz = cpu_max_mhz = None
+
+        # ── CPU + GPU temperatures ─────────────────────────────────────────
+        try:
+            t = get_cpu_temp()
+            if t:
+                cpu_temp = float(t)
+        except Exception:
+            pass
+
+        try:
+            g = get_gpu_temp()
+            if g:
+                gpu_temp = float(g)
+        except Exception:
+            pass
+
+        # CPU temperature tiers (warn / critical with consecutive-reading hysteresis)
+        if cpu_temp is not None:
+            if cpu_temp >= DM_CPU_TEMP_CRIT:
+                self._dm_cpu_temp_crit_cnt += 1
+                if self._dm_cpu_temp_crit_cnt >= 2:
+                    self._alert("cpu_temp_crit", f"{cpu_temp:.0f}", urgent=True)
+                    self._dm_healthy_report_due = True
+            elif cpu_temp >= DM_CPU_TEMP_WARN:
+                self._dm_cpu_temp_crit_cnt = max(0, self._dm_cpu_temp_crit_cnt - 1)
+                self._alert("cpu_temp_warn", f"{cpu_temp:.0f}")
+                self._dm_healthy_report_due = True
+            else:
+                self._dm_cpu_temp_crit_cnt = max(0, self._dm_cpu_temp_crit_cnt - 1)
+
+        # GPU temperature tiers
+        if gpu_temp is not None:
+            if gpu_temp >= DM_GPU_TEMP_CRIT:
+                self._dm_gpu_temp_crit_cnt += 1
+                if self._dm_gpu_temp_crit_cnt >= 2:
+                    self._alert("gpu_temp_crit", f"{gpu_temp:.0f}", urgent=True)
+                    self._dm_healthy_report_due = True
+            elif gpu_temp >= DM_GPU_TEMP_WARN:
+                self._dm_gpu_temp_crit_cnt = max(0, self._dm_gpu_temp_crit_cnt - 1)
+                self._alert("gpu_temp_warn", f"{gpu_temp:.0f}")
+                self._dm_healthy_report_due = True
+            else:
+                self._dm_gpu_temp_crit_cnt = max(0, self._dm_gpu_temp_crit_cnt - 1)
+
+        # ── Severe CPU frequency throttle ─────────────────────────────────
+        try:
+            import psutil as _ps
+            freq = _ps.cpu_freq()
+            if freq and freq.max and freq.current:
+                ratio = freq.current / freq.max
+                if ratio < DM_CPU_FREQ_DROP:
+                    self._alert("cpu_freq_severe", f"{ratio*100:.0f}")
+        except Exception:
+            pass
+
+        # ── Multi-drive disk space check ──────────────────────────────────
+        try:
+            import psutil as _ps
+            for part in _ps.disk_partitions(all=False):
+                if not part.mountpoint:
+                    continue
+                # Skip virtual drives (cd-rom, network)
+                if part.fstype in ("cdfs", "udf", "") or "cdrom" in part.opts:
+                    continue
+                try:
+                    usage = _ps.disk_usage(part.mountpoint)
+                    free_gb = usage.free / 1_073_741_824
+                    if free_gb < DM_MULTI_DISK_LOW:
+                        drive_label = part.mountpoint.rstrip("\\").rstrip("/") or part.device
+                        event_key = f"disk_low_{drive_label}"
+                        self._alert("multi_disk_low", drive_label)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # ── Sensor health insight (positive feedback when all is well) ────
+        # Send a brief positive status at most once per session, only after
+        # a previous issue was resolved and the system has been calm.
+        try:
+            import psutil as _ps
+            cpu_pct = _ps.cpu_percent(interval=None)
+            ram_pct = _ps.virtual_memory().percent
+            temps_ok = (
+                (cpu_temp is None or cpu_temp < DM_CPU_TEMP_WARN) and
+                (gpu_temp is None or gpu_temp < DM_GPU_TEMP_WARN)
+            )
+            if (self._dm_healthy_report_due and temps_ok
+                    and cpu_pct < 60 and ram_pct < 75):
+                self._dm_healthy_report_due = False
+                t_str = ""
+                parts = []
+                if cpu_temp:
+                    parts.append(f"{cpu_temp:.0f} C")
+                if gpu_temp:
+                    parts.append(f"GPU {gpu_temp:.0f} C")
+                if parts:
+                    t_str = "  |  ".join(parts)
+                else:
+                    t_str = f"{cpu_pct:.0f}%"
+                pool = _MSGS.get("sensor_health_insight", {}).get(self._lang, [])
+                if pool:
+                    msg = random.choice(pool).format(val=t_str)
+                    self._push(msg)
+        except Exception:
+            pass
 
     # ── Push helper ───────────────────────────────────────────────────────────
 
