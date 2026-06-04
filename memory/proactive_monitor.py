@@ -47,7 +47,22 @@ SESSION_WINDOW_S    = 1800   # 30-minute window
 
 # Process anomaly - new heavy process threshold
 PROC_SPIKE_PCT      = 30.0   # single process using >30% CPU -> spike alert
-PROC_SPIKE_MIN_GAP  = 600    # 10 min cooldown per process name
+PROC_SPIKE_MIN_GAP  = 3600   # 1 h cooldown per process name (was 10 min — caused spam)
+
+# Processes that should NEVER trigger spike alerts.
+# System Idle Process = Windows idle time counter (high CPU% = CPU is idle).
+# python.exe = PC Workman itself. Registry/System = kernel pseudo-processes.
+_PROC_SPIKE_IGNORE: frozenset = frozenset({
+    "system idle process",
+    "idle",
+    "system",
+    "registry",
+    "memory compression",
+    "secure system",
+    "python.exe",    # PC Workman itself
+    "python3.exe",
+    "pythonw.exe",
+})
 
 # DeepMonitor thresholds
 DM_CPU_TEMP_WARN    = 80.0   # CPU temp warning threshold (°C)
@@ -149,14 +164,15 @@ _MSGS: dict[str, dict[str, list[str]]] = {
     # New heavy process appeared
     "process_spike": {
         "pl": [
-            "hck_GPT: 🔍 Nowy proces: {val} zużywa dużo CPU. Wpisz 'co to {val}' jeśli nie wiesz co to.",
-            "hck_GPT: ⚠ {val} wskoczył na listę top obciążeń. Normalnie go tu nie ma. Wpisz 'top procesy'.",
-            "hck_GPT: Wykryłem {val} - zużywa znaczną część CPU. Przypadkowe uruchomienie czy zaplanowane?",
+            # Note: no "Wpisz 'co to {val}'" — tooltip on process name handles that
+            "hck_GPT: 🔍 {val} pojawił się i zużywa dużo CPU. Najedź na nazwę po szczegóły.",
+            "hck_GPT: ⚠ {val} wskoczył na listę top obciążeń. Normalnie go tu nie ma.",
+            "hck_GPT: Wykryłem {val} - zużywa znaczną część CPU. Przypadkowe czy zaplanowane?",
         ],
         "en": [
-            "hck_GPT: 🔍 New heavy process: {val} appeared and is consuming a lot of CPU.",
-            "hck_GPT: ⚠ {val} just jumped onto the top load list - it doesn't usually show up here.",
-            "hck_GPT: Spotted {val} using significant CPU. Normal activity, or something unexpected?",
+            "hck_GPT: 🔍 {val} appeared and is consuming significant CPU. Hover its name for details.",
+            "hck_GPT: ⚠ {val} jumped onto the top load list - unusual. Normal activity?",
+            "hck_GPT: Spotted {val} using significant CPU. Expected, or something unexpected?",
         ],
     },
     # Morning brief - first launch of the day
@@ -344,7 +360,9 @@ class ProactiveMonitor:
     """
 
     def __init__(self) -> None:
-        self._push_fn:   Optional[Callable[[str], None]] = None
+        self._push_fn:      Optional[Callable[[str], None]] = None
+        self._hot_fn:       Optional[Callable[[str], None]] = None
+        self._hot_clear_fn: Optional[Callable[[], None]]    = None
         register_component("hck_gpt.proactive_monitor", self, STATUS_OK)
         self._banner_fn: Optional[Callable[[str], None]] = None
         self._lang:      str  = "en"   # matches panel default; updated on first user message
@@ -401,6 +419,15 @@ class ProactiveMonitor:
     def register_push(self, fn: Callable[[str], None]) -> None:
         """Register callback for in-chat messages (must be thread-safe)."""
         self._push_fn = fn
+
+    def register_hot(self, fn: Callable[[str], None]) -> None:
+        """Register callback for HOT strip (RAM/CPU/GPU critical alerts).
+        These are shown only in the red strip, never as chat messages."""
+        self._hot_fn = fn
+
+    def register_hot_clear(self, fn: Callable[[], None]) -> None:
+        """Register callback to clear the HOT strip when metrics normalize."""
+        self._hot_clear_fn = fn
 
     def register_banner(self, fn: Callable[[str], None]) -> None:
         """Register callback for banner status text updates."""
@@ -464,9 +491,11 @@ class ProactiveMonitor:
         # accumulate in this dict indefinitely. Prune entries older than 1 h.
         now_prune = time.time()
         if self._proc_spike_last:
+            # Keep entries for 4 h (was 1 h — too short, caused cooldown resets
+            # that let System Idle Process spam every hour of a long session)
             self._proc_spike_last = {
                 k: v for k, v in self._proc_spike_last.items()
-                if now_prune - v < 3600
+                if now_prune - v < 14400
             }
 
         # Use interval=1 (was 2) - shorter blocking, still accurate enough
@@ -520,18 +549,20 @@ class ProactiveMonitor:
             except Exception:
                 pass
 
-        # RAM - sustained critical (2+ readings) gets stronger alert
+        # RAM critical -> HOT strip only (never to chat)
         if ram >= RAM_CRIT_PCT:
             self._ram_crit_cnt += 1
             if self._ram_crit_cnt >= 2:
-                self._alert("ram_crit", f"{ram:.0f}", urgent=True)
+                self._push_hot_ram(ram)
         else:
+            if self._ram_crit_cnt >= 2:
+                self._clear_hot()   # RAM back to normal -> clear HOT strip
             self._ram_crit_cnt = max(0, self._ram_crit_cnt - 1)
 
         # GPU temperature spike + sustained CPU temp
         try:
             from hck_gpt.context.system_context import system_context
-            snap = system_context.snapshot()
+            snap = system_context.snapshot(force=True)
             gpu_temp = snap.get("gpu_temp", None)
             if gpu_temp and gpu_temp > 87:
                 self._alert("gpu_temp_spike", f"{gpu_temp:.0f}")
@@ -548,13 +579,19 @@ class ProactiveMonitor:
             pass
 
         # Process anomaly - new heavy process detection
+        # System Idle Process and kernel pseudo-processes are filtered out —
+        # their high CPU% is normal/meaningless and would spam the user.
         try:
             import psutil as _ps
             now = time.time()
-            for proc in _ps.process_iter(["name", "cpu_percent"]):
+            for proc in _ps.process_iter(["name", "pid", "cpu_percent"]):
                 try:
+                    pid   = proc.info["pid"] or 0
                     pname = proc.info["name"] or ""
                     pcpu  = proc.info["cpu_percent"] or 0.0
+                    # Filter: PID 0 and known non-actionable processes
+                    if pid == 0 or pname.lower() in _PROC_SPIKE_IGNORE:
+                        continue
                     if pcpu < PROC_SPIKE_PCT:
                         continue
                     last_spike = self._proc_spike_last.get(pname, 0)
@@ -562,7 +599,7 @@ class ProactiveMonitor:
                         continue
                     self._proc_spike_last[pname] = now
                     self._alert("process_spike", pname)
-                    break   # only one per check cycle
+                    break   # only one alert per check cycle
                 except Exception:
                     continue
         except Exception:
@@ -592,11 +629,7 @@ class ProactiveMonitor:
             if not self._recovery_notified.get("ram"):
                 self._recovery_notified["ram"] = True
                 self._was_ram_crit = False
-                if lang := self._lang:
-                    msg = (f"hck_GPT: ✓ RAM wróciło do normy - {ram:.0f}%. Świeżo po kryzysie."
-                           if lang == "pl" else
-                           f"hck_GPT: ✓ RAM back to normal - {ram:.0f}%. Crisis over.")
-                    self._push(msg)
+                self._clear_hot()   # RAM resolved -> clear HOT strip silently
         elif ram >= RAM_CRIT_PCT:
             self._was_ram_crit = True
             self._recovery_notified["ram"] = False
@@ -605,6 +638,29 @@ class ProactiveMonitor:
         self._update_banner(cpu, ram)
 
     # ── Alert dispatch ────────────────────────────────────────────────────────
+
+    def _push_hot_ram(self, ram: float) -> None:
+        """Send RAM critical alert to HOT strip only — never to chat."""
+        lang = self._lang
+        if lang == "pl":
+            if ram >= 95:
+                msg = f"RAM na {ram:.0f}% - krytyczne! Zamknij programy lub uruchom RAM Flush."
+            else:
+                msg = f"RAM na {ram:.0f}% - system może siegn po plik wymiany."
+        else:
+            if ram >= 95:
+                msg = f"RAM at {ram:.0f}% - critical! Close apps or run RAM Flush."
+            else:
+                msg = f"RAM at {ram:.0f}% - may start using page file."
+        if self._hot_fn:
+            try: self._hot_fn(msg)
+            except Exception: pass
+
+    def _clear_hot(self) -> None:
+        """Tell the HOT strip to clear itself."""
+        if self._hot_clear_fn:
+            try: self._hot_clear_fn()
+            except Exception: pass
 
     def _budget_ok(self, urgent: bool = False) -> bool:
         """Session budget check - CHI 2025: max 3 unsolicited alerts per 30-min window."""
