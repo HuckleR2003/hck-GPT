@@ -4,7 +4,7 @@ import random
 import traceback
 from datetime import datetime, timedelta
 
-_PATTERN_TTL = 300   # 5 min — 7-day scan is expensive
+_PATTERN_TTL = 300   # 5 min - 7-day scan is expensive
 _SUMMARY_TTL  = 120  # 2 min
 _BANNER_TTL   = 30   # 30 s
 
@@ -36,45 +36,45 @@ class InsightsEngine:
             "Gaming": [
                 "Ready for another round of {name}? Your GPU is warmed up.",
                 "{name} again? Let's see if your CPU can keep up today.",
-                "Your PC is expecting {name} — it's been {freq}/7 days.",
+                "Your PC is expecting {name} - it's been {freq}/7 days.",
                 "{name} incoming? Average CPU hit: {cpu:.0f}%. Game on.",
                 "Gaming session loading… {name} ran {freq}/7 days this week.",
-                "{name} is basically your second job at this point — {freq}/7 days.",
+                "{name} is basically your second job at this point - {freq}/7 days.",
             ],
             "Browser": [
                 "{name} again? Your RAM knows the drill.",
                 "Round {freq} of {name} this week. Classic.",
-                "{name} — your RAM's favourite customer. ~{ram:.0f}MB daily.",
+                "{name} - your RAM's favourite customer. ~{ram:.0f}MB daily.",
                 "Tabs are calling! {name} has been active {freq}/7 days.",
                 "{name}: {freq}/7 days, ~{ram:.0f}MB RAM. Your browser of choice.",
                 "Another day, another tab. {name} is here {freq}/7 days.",
             ],
             "Development": [
                 "Back to {name}? Let's see what you build today.",
-                "{name} — {freq}/7 days. Productivity mode activated.",
+                "{name} - {freq}/7 days. Productivity mode activated.",
                 "Time to code? {name} is your daily driver.",
-                "{name} on {freq}/7 days — something's being built here.",
+                "{name} on {freq}/7 days - something's being built here.",
                 "Dev mode: {name} running. CPU avg {cpu:.0f}%. Let's go.",
-                "{name} again — {freq}/7 days this week. Consistent grind.",
+                "{name} again - {freq}/7 days this week. Consistent grind.",
             ],
             "Communication": [
-                "{name} calling — you use it almost every day.",
-                "{name} — {freq}/7 days. Staying connected.",
+                "{name} calling - you use it almost every day.",
+                "{name} - {freq}/7 days. Staying connected.",
                 "Looks like {name} is part of the daily routine. {freq}/7 days.",
                 "{name} is basically always on. {freq}/7 days this week.",
             ],
             "Media": [
                 "{name} time? {freq}/7 days and counting.",
-                "{name} — part of your daily routine now.",
+                "{name} - part of your daily routine now.",
                 "{name} on {freq}/7 days. You clearly enjoy it.",
                 "Media mode: {name} shows up {freq}/7 days. Well deserved.",
             ],
             "_default": [
-                "{name} — {freq}/7 days. It's basically part of your system now.",
+                "{name} - {freq}/7 days. It's basically part of your system now.",
                 "You've been running {name} regularly. CPU avg: {cpu:.0f}%.",
-                "{name} is a frequent visitor — {freq} out of the last 7 days.",
+                "{name} is a frequent visitor - {freq} out of the last 7 days.",
                 "Noticed: {name} runs {freq}/7 days. It's earned its place here.",
-                "{name} — CPU ~{cpu:.0f}%, seen {freq}/7 days. Your silent regular.",
+                "{name} - CPU ~{cpu:.0f}%, seen {freq}/7 days. Your silent regular.",
                 "{name} keeps showing up. {freq}/7 days, avg {cpu:.0f}% CPU.",
             ],
         }
@@ -136,7 +136,7 @@ class InsightsEngine:
         if summary and summary.get("cpu_avg"):
             cpu_avg = summary["cpu_avg"]
             qualifier = "light" if cpu_avg < 30 else "moderate" if cpu_avg < 60 else "heavy"
-            line = f"hck_GPT: Yesterday was a {qualifier} day — CPU averaged {cpu_avg:.0f}%"
+            line = f"hck_GPT: Yesterday was a {qualifier} day - CPU averaged {cpu_avg:.0f}%"
             if yesterday_procs:
                 top = yesterday_procs[0]
                 name = top.get("display_name", top.get("process_name", "?"))
@@ -211,9 +211,9 @@ class InsightsEngine:
                      "cpu_temp": "CPU temp", "gpu_temp": "GPU temp"}.get(metric, metric.upper())
             icon = "!" if severity == "critical" else "^"
             if baseline:
-                return (f"hck_GPT: [{icon}] {label} spike — "
+                return (f"hck_GPT: [{icon}] {label} spike - "
                         f"{value:.0f}% (+{value - baseline:.0f} above {baseline:.0f}%)")
-            return f"hck_GPT: [{icon}] {label} spike detected — {value:.0f}%"
+            return f"hck_GPT: [{icon}] {label} spike detected - {value:.0f}%"
         except Exception:
             return None
 
@@ -246,8 +246,8 @@ class InsightsEngine:
                 cpu = g.get("cpu_avg", 0)
                 ram = g.get("ram_avg_mb", 0)
                 return random.choice([
-                    f"hck_GPT: {pname} is running — CPU {cpu:.0f}%. Game on.",
-                    f"hck_GPT: {pname} active — CPU {cpu:.0f}%, RAM {ram:.0f}MB.",
+                    f"hck_GPT: {pname} is running - CPU {cpu:.0f}%. Game on.",
+                    f"hck_GPT: {pname} active - CPU {cpu:.0f}%, RAM {ram:.0f}MB.",
                     f"hck_GPT: Gaming detected: {pname} @ CPU {cpu:.0f}%.",
                 ])
 
@@ -257,7 +257,7 @@ class InsightsEngine:
                 ram = b.get("ram_avg_mb", 0)
                 if ram > 400:
                     return random.choice([
-                        f"hck_GPT: {pname} is eating RAM — {ram:.0f}MB. Consider closing tabs.",
+                        f"hck_GPT: {pname} is eating RAM - {ram:.0f}MB. Consider closing tabs.",
                         f"hck_GPT: {pname} memory: {ram:.0f}MB. Tab management recommended.",
                     ])
 
@@ -266,14 +266,14 @@ class InsightsEngine:
                 name = d.get("display_name", d["name"])
                 cpu = d.get("cpu_avg", 0)
                 if cpu > 15:
-                    return f"hck_GPT: {name} is working hard — CPU {cpu:.0f}%."
+                    return f"hck_GPT: {name} is working hard - CPU {cpu:.0f}%."
 
             if filtered:
                 heavy = filtered[0]
                 pname = self._ensure_exe(heavy.get("name", ""))
                 cpu = heavy.get("cpu_avg", 0)
                 if cpu > 30:
-                    return f"hck_GPT: {pname} is using {cpu:.0f}% CPU — that's heavy."
+                    return f"hck_GPT: {pname} is using {cpu:.0f}% CPU - that's heavy."
 
             return None
         except Exception:
@@ -295,7 +295,7 @@ class InsightsEngine:
             1: "1 hour in! Your system is running smooth.",
             2: "2 hours of monitoring. Everything logged.",
             4: "4 hours! That's a solid session.",
-            8: "8 hours of uptime — marathon session!",
+            8: "8 hours of uptime - marathon session!",
             12: "12 hours. Your PC is a trooper.",
         }
         for h, msg in milestones.items():
@@ -307,7 +307,7 @@ class InsightsEngine:
 
     def get_health_check(self) -> list[str]:
         self._ensure_loaded()
-        lines = ["━" * 28, "hck_GPT — Quick Health Check", "━" * 28, ""]
+        lines = ["━" * 28, "hck_GPT - Quick Health Check", "━" * 28, ""]
 
         session_str = self._format_duration(self.get_session_uptime())
         lines.append(f"Session uptime: {session_str}")
@@ -337,7 +337,7 @@ class InsightsEngine:
                       f"GPU {summary.get('gpu_avg', 0):.0f}%"]
             cpu_max = summary.get("cpu_max", 0)
             if cpu_max > 85:
-                lines.append(f"   Peak CPU: {cpu_max:.0f}% — that's high!")
+                lines.append(f"   Peak CPU: {cpu_max:.0f}% - that's high!")
             elif cpu_max > 0:
                 lines.append(f"   Peak CPU: {cpu_max:.0f}%")
 
@@ -347,7 +347,7 @@ class InsightsEngine:
                 total = alerts.get("total", 0)
                 lines.append("")
                 if total == 0:
-                    lines.append("No active alerts — system is healthy")
+                    lines.append("No active alerts - system is healthy")
                 else:
                     parts = []
                     if alerts.get("critical"):
@@ -367,7 +367,7 @@ class InsightsEngine:
                     lines.append(f"Data collected: {days} day{'s' if days != 1 else ''} "
                                  f"(since {dr.get('earliest_date', '?')})")
                 else:
-                    lines.append("Data collection: just started — give it time")
+                    lines.append("Data collection: just started - give it time")
             except Exception:
                 pass
 
@@ -378,7 +378,7 @@ class InsightsEngine:
 
     def get_habit_summary(self) -> list[str]:
         self._ensure_loaded()
-        lines = ["━" * 28, "hck_GPT — Your Usage Profile", "━" * 28, ""]
+        lines = ["━" * 28, "hck_GPT - Your Usage Profile", "━" * 28, ""]
 
         today = datetime.now().strftime("%Y-%m-%d")
         today_procs = self._get_daily_breakdown(today, top_n=10)
@@ -390,7 +390,7 @@ class InsightsEngine:
                 name = proc.get("display_name", proc.get("process_name", "?"))
                 cpu = proc.get("cpu_avg", 0)
                 secs = proc.get("total_active_seconds", proc.get("active_seconds", 0))
-                lines.append(f"  {i}. {name} — CPU {cpu:.1f}%, active {self._format_duration(secs)}")
+                lines.append(f"  {i}. {name} - CPU {cpu:.1f}%, active {self._format_duration(secs)}")
 
             lines.append("")
             if classified["browsers"]:
@@ -405,7 +405,7 @@ class InsightsEngine:
                 d = classified["dev_tools"][0]
                 lines.append(f"Dev: {d.get('display_name', d['name'])}")
         else:
-            lines += ["Not enough data yet — keep the app running!",
+            lines += ["Not enough data yet - keep the app running!",
                       "Process stats accumulate over hours."]
 
         this_week = self._get_summary(days=7)
@@ -425,7 +425,7 @@ class InsightsEngine:
         if patterns:
             lines += ["", "Your regulars (last 7 days):"]
             for p in patterns[:3]:
-                lines.append(f"   {p['display_name']} — {p['frequency']}/7 days, "
+                lines.append(f"   {p['display_name']} - {p['frequency']}/7 days, "
                              f"CPU ~{p['avg_cpu']:.0f}%")
 
         lines += ["", "━" * 28]
@@ -435,7 +435,7 @@ class InsightsEngine:
 
     def get_anomaly_report(self) -> list[str]:
         self._ensure_loaded()
-        lines = ["━" * 28, "hck_GPT — Anomaly Report (24h)", "━" * 28, ""]
+        lines = ["━" * 28, "hck_GPT - Anomaly Report (24h)", "━" * 28, ""]
 
         if not self._query_api:
             lines.append("Stats engine not available.")
@@ -472,9 +472,9 @@ class InsightsEngine:
                 lines.append(f"  [{icon}] [{t}] {desc}")
 
             if counts["critical"] > 2:
-                lines += ["", "Multiple critical events — check your cooling and load."]
+                lines += ["", "Multiple critical events - check your cooling and load."]
             elif total > 10:
-                lines += ["", "High event count — your system was under pressure."]
+                lines += ["", "High event count - your system was under pressure."]
 
         except Exception as ex:
             lines.append(f"Error reading events: {ex}")
@@ -498,7 +498,7 @@ class InsightsEngine:
         try:
             text = random.choice(templates).format(name=name, freq=freq, cpu=cpu, ram=ram)
         except (KeyError, ValueError):
-            text = f"{name} — you use it {freq}/7 days."
+            text = f"{name} - you use it {freq}/7 days."
 
         # Store for follow-up "explain that" / "what does that mean" queries
         try:
@@ -522,7 +522,7 @@ class InsightsEngine:
             return [f"hck_GPT: {teaser}"]
         return [
             "hck_GPT: Not enough usage data to detect your habits yet.",
-            "hck_GPT: Keep the app running — I learn from your patterns.",
+            "hck_GPT: Keep the app running - I learn from your patterns.",
         ]
 
     # ── Banner status (cached 30s) ─────────────────────────────────────
@@ -620,7 +620,7 @@ class InsightsEngine:
         return result
 
     def _detect_recurring_patterns(self, days: int = 7) -> list:
-        """5-min cache — SQLite scan across N days is expensive."""
+        """5-min cache - SQLite scan across N days is expensive."""
         now = time.time()
         if self._pattern_cache is not None and (now - self._pattern_cache_ts) < _PATTERN_TTL:
             return self._pattern_cache
@@ -692,16 +692,16 @@ class InsightsEngine:
                 return None
             cpu_d = tw_cpu - lw_cpu
             ram_d = tw_ram - lw_ram
-            cpu_arrow = "↑" if cpu_d > 3 else ("↓" if cpu_d < -3 else "→")
-            ram_arrow = "↑" if ram_d > 3 else ("↓" if ram_d < -3 else "→")
+            cpu_arrow = "↑" if cpu_d > 3 else ("↓" if cpu_d < -3 else "->")
+            ram_arrow = "↑" if ram_d > 3 else ("↓" if ram_d < -3 else "->")
             if lang == "pl":
-                return (f"Ten tydzień vs poprzedni — "
+                return (f"Ten tydzień vs poprzedni - "
                         f"CPU: {cpu_arrow} {'+' if cpu_d >= 0 else ''}{cpu_d:.0f}% "
-                        f"({lw_cpu:.0f}% → {tw_cpu:.0f}%)  |  "
+                        f"({lw_cpu:.0f}% -> {tw_cpu:.0f}%)  |  "
                         f"RAM: {ram_arrow} {'+' if ram_d >= 0 else ''}{ram_d:.0f}%")
-            return (f"This week vs last — "
+            return (f"This week vs last - "
                     f"CPU: {cpu_arrow} {'+' if cpu_d >= 0 else ''}{cpu_d:.0f}% "
-                    f"({lw_cpu:.0f}% → {tw_cpu:.0f}%)  |  "
+                    f"({lw_cpu:.0f}% -> {tw_cpu:.0f}%)  |  "
                     f"RAM: {ram_arrow} {'+' if ram_d >= 0 else ''}{ram_d:.0f}%")
         except Exception:
             return None
