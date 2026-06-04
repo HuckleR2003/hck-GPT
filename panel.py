@@ -21,6 +21,15 @@ try:
 except Exception:
     HAS_PROACTIVE = False
 
+try:
+    from utils.i18n import get_lang as _i18n_get_lang, set_lang as _i18n_set_lang, register_on_change as _i18n_register
+    HAS_I18N = True
+except ImportError:
+    HAS_I18N = False
+    def _i18n_get_lang(): return "en"
+    def _i18n_set_lang(_): pass
+    def _i18n_register(_): pass
+
 # process library and tooltip
 try:
     from hck_gpt.process_library import process_library
@@ -30,10 +39,10 @@ except ImportError:
     HAS_PROCESS_LIBRARY = False
     print("[hck_GPT] Process library not available")
 
-# Send button — pure bordeaux terminal style  "> SEND >"
+# Send button - pure bordeaux terminal style  "> SEND >"
 _SB_BG_N   = "#0e0006"   # very dark bordeaux background
-_SB_BG_H   = "#3b0014"   # hover — mid bordeaux
-_SB_BG_P   = "#5c0020"   # press — richer bordeaux
+_SB_BG_H   = "#3b0014"   # hover - mid bordeaux
+_SB_BG_P   = "#5c0020"   # press - richer bordeaux
 _SB_FG_N   = "#9f1239"   # text normal  (rose-900)
 _SB_FG_H   = "#f43f5e"   # text hover   (rose-500)
 _SB_FG_P   = "#ffffff"   # text press   (white flash)
@@ -64,14 +73,22 @@ class HCKGPTPanel:
         # First hck_GPT: message gets brand badge ("hck_GPT" label) instead of time
         self._brand_badge_once = True
 
-        # Active tip tracking — only 1 tip visible at a time
+        # Active tip tracking - only 1 tip visible at a time
         self._tip_active = False
 
-        # Conversation turn counter — unique bg tag per Q&A pair
+        # HOT alert strip - anti-spam state
+        self._hot_active   = False    # is the HOT strip currently shown?
+        self._hot_msg      = ""       # current message text
+        self._hot_check_id = None     # after() id for periodic check
+
+        # Conversation turn counter - unique bg tag per Q&A pair
         self._turn_count = 0
 
-        # UI language: "auto" | "en" | "pl"  (default = English)
-        self._ui_lang = "en"
+        # UI language: "auto" | "en" | "pl"  (synced with global i18n)
+        self._ui_lang = _i18n_get_lang()
+
+        # Hook into global language changes (e.g. Settings page switch)
+        _i18n_register(self._on_i18n_lang_changed)
 
         # chat handler
         self.chat_handler = ChatHandler() if HAS_CHAT_HANDLER else None
@@ -79,11 +96,11 @@ class HCKGPTPanel:
         # tooltip system
         self.tooltip = ProcessTooltip(parent) if HAS_PROCESS_LIBRARY else None
 
-        # Proactive monitor — register thread-safe callbacks, then start
+        # Proactive monitor - register thread-safe callbacks, then start
         if HAS_PROACTIVE:
             try:
-                # push: tip messages → _insert_tip (replaces previous tip, yellow badge)
-                #        alert messages → add_message (standard time badge)
+                # push: tip messages -> _insert_tip (replaces previous tip, yellow badge)
+                #        alert messages -> add_message (standard time badge)
                 proactive_monitor.register_push(
                     lambda msg: parent.after(0, lambda m=msg: (
                         self._insert_tip(m) if "\U0001f4a1" in m else self.add_message(m)
@@ -95,6 +112,13 @@ class HCKGPTPanel:
                         0, lambda s=status: self._set_banner_status(s)
                     )
                 )
+                # hot: RAM/CPU/GPU critical -> HOT strip only, never to chat
+                proactive_monitor.register_hot(
+                    lambda msg: parent.after(0, lambda m=msg: self._set_hot(m))
+                )
+                proactive_monitor.register_hot_clear(
+                    lambda: parent.after(0, self._clear_hot)
+                )
                 proactive_monitor.start()
                 # Sync language immediately so first alerts match panel language
                 proactive_monitor.set_language(self._ui_lang)
@@ -103,7 +127,7 @@ class HCKGPTPanel:
 
         register_component('hck_gpt.panel', self, STATUS_OK)
 
-        # MAIN PANEL — starts off-screen below, slides up via _animate_initial_appearance()
+        # MAIN PANEL - starts off-screen below, slides up via _animate_initial_appearance()
         self.frame = tk.Frame(parent, bg=THEME["bg_panel"])
         self.frame.place(x=0, y=800, width=self.width, height=0)
 
@@ -118,7 +142,7 @@ class HCKGPTPanel:
 
         self._draw_gradient_banner()
 
-        # Left accent pulse bar (3px, UI layer — animated via itemconfig)
+        # Left accent pulse bar (3px, UI layer - animated via itemconfig)
         self._left_bar = self.banner.create_rectangle(
             0, 0, 3, self.collapsed_h, fill="#7a0f20", outline="", tags="ui"
         )
@@ -136,7 +160,7 @@ class HCKGPTPanel:
         self.banner_text = self.banner.create_text(
             42, self.collapsed_h // 2,
             anchor="w",
-            text="hck_GPT  —  Your PC Companion",
+            text="hck_GPT  -  Your PC Companion",
             font=("Segoe UI", 9, "bold"),
             fill="#f0dde0",
             tags="ui"
@@ -315,16 +339,49 @@ class HCKGPTPanel:
         self.log.tag_configure("orange", foreground="#f97316")
         self.log.tag_configure("light_purple", foreground="#c084fc")
         self.log.tag_configure("user_msg", foreground=THEME["text"])
+        # Welcome block: near-black bg so startup table stands out subtly
+        self.log.tag_configure("welcome_bg",
+                               background="#060810",
+                               foreground=THEME["text"])
+        # Advisory tips (💡 action hints): very subtle green bg
+        self.log.tag_configure("tip_green",
+                               background="#071a0e",   # ~25% #10b981 on dark bg
+                               foreground="#6ee7b7")
 
-        # ── Navigation link tags — clickable [→ Name] markers ────────────────
-        # _nav_callbacks: name → callable (registered from main window)
+        # ── Navigation link tags - clickable [-> Name] markers ────────────────
+        # _nav_callbacks: name -> callable (registered from main window)
         # _nav_link_count: unique tag ID per link so each can have its own bind
         self._nav_callbacks: dict = {}
         self._nav_link_count: int = 0
-        # Pre-wire Virtual Memory — opens Windows sysdm.cpl directly, no nav needed
+        # Pre-wire Virtual Memory - opens Windows sysdm.cpl directly, no nav needed
         self._nav_callbacks["Virtual Memory"] = self._open_virtual_memory
 
-        # ── TIP STRIP — dedicated widget, always exactly one tip ──────────────
+        # ── HOT ALERT STRIP - above TIP, anti-spam system alerts ─────────────
+        # Shown when RAM/CPU/GPU exceeds threshold; auto-dismissed when normal.
+        # Only ONE message at a time; no repeated pop-ins while condition holds.
+        _HOT_BG     = "#1a0404"   # deep crimson-night
+        _HOT_BORDER = "#3d0808"
+        _HOT_FG     = "#c53030"   # muted red text
+        self._hot_strip = tk.Frame(
+            self.chat, bg=_HOT_BG,
+            highlightbackground=_HOT_BORDER, highlightthickness=1
+        )
+        _hb = tk.Canvas(self._hot_strip, width=30, height=14,
+                        bg="#2a0606", highlightthickness=0)
+        _hb.create_text(15, 7, text="HOT", fill=_HOT_FG,
+                        font=("Consolas", 6, "bold"), anchor="center")
+        _hb.pack(side="left", padx=(6, 0), pady=2)
+        self._hot_label = tk.Label(
+            self._hot_strip, text="",
+            bg=_HOT_BG, fg=_HOT_FG,
+            font=("Consolas", 8),
+            wraplength=0, justify="left", anchor="w",
+            padx=5, pady=2
+        )
+        self._hot_label.pack(side="left", fill="x", expand=True)
+        # Hidden by default - shown by _set_hot / cleared by _clear_hot
+
+        # ── TIP STRIP - dedicated widget, always exactly one tip ──────────────
         # Lives between log and input. Shown via pack(), hidden via pack_forget().
         # Replaces the old mark-based in-log approach (which was unreliable with
         # window_create). Guarantees: max 1 tip visible, instant replacement.
@@ -347,7 +404,7 @@ class HCKGPTPanel:
             padx=5, pady=2
         )
         self._tip_label.pack(side="left", fill="x", expand=True)
-        # Hidden by default — _insert_tip() shows it, _remove_active_tip() hides it
+        # Hidden by default - _insert_tip() shows it, _remove_active_tip() hides it
 
         self._entry_container = tk.Frame(self.chat, bg=THEME["bg_panel"])
         entry_container = self._entry_container
@@ -375,7 +432,7 @@ class HCKGPTPanel:
 
         self._start_cursor_blink()
 
-        # ── Canvas-drawn send button — lime/bordeaux, no PNG ─────────────────
+        # ── Canvas-drawn send button - lime/bordeaux, no PNG ─────────────────
         send_wrapper = tk.Frame(entry_container, bg=THEME["bg_panel"])
         send_wrapper.pack(side="right", padx=(8, 0))
 
@@ -417,12 +474,16 @@ class HCKGPTPanel:
         self._welcome()
 
         self._start_banner_ticker()
+        # HOT strip is driven exclusively by proactive_monitor via register_hot().
+        # The panel had its own duplicate monitor (_start_hot_monitor) that
+        # conflicted with proactive_monitor at overlapping thresholds and also
+        # contained broken Polish diacritics — removed.
 
         parent.bind("<Configure>", self._on_resize)
 
-    # BORDEAUX NOIR GRADIENT BANNER (black → deep crimson, living shimmer)
+    # BORDEAUX NOIR GRADIENT BANNER (black -> deep crimson, living shimmer)
     def _draw_gradient_banner(self, phase=0.0):
-        """Redraws gradient strips with sine-wave shimmer. Tagged 'grad' — UI layer raised on top."""
+        """Redraws gradient strips with sine-wave shimmer. Tagged 'grad' - UI layer raised on top."""
         import math
         w = self.width
         h = self.collapsed_h
@@ -484,7 +545,7 @@ class HCKGPTPanel:
         except Exception:
             return
 
-        # Advance shimmer phase — sine wave travels across gradient (~6 s full cycle)
+        # Advance shimmer phase - sine wave travels across gradient (~6 s full cycle)
         self._sweep_phase = (self._sweep_phase + 0.105) % (math.pi * 20)
         self._draw_gradient_banner(phase=self._sweep_phase)
 
@@ -518,11 +579,42 @@ class HCKGPTPanel:
         self.banner.itemconfig(self.banner_text, fill="#f0dde0")
         self.banner.itemconfig(self.banner_arrow, fill="#c0182a")
 
+    # LANGUAGE SYNC CALLBACKS
+
+    def _on_i18n_lang_changed(self):
+        """Called by i18n.set_lang() whenever the global language changes."""
+        new_lang = _i18n_get_lang()
+        if new_lang == self._ui_lang:
+            return
+        self._ui_lang = new_lang
+        if HAS_PROACTIVE:
+            try:
+                proactive_monitor.set_language(self._ui_lang)
+            except Exception:
+                pass
+        try:
+            self.parent.after(0, self._refresh_welcome_for_lang)
+        except Exception:
+            pass
+
+    def _refresh_welcome_for_lang(self):
+        """Clear chat and re-display welcome screen in the current language."""
+        try:
+            if not self.log.winfo_exists():
+                return
+        except Exception:
+            return
+        self.clear_chat()
+        self._brand_badge_once = True
+        self._welcome()
+
     # WELCOME MESSAGES
     def _welcome(self):
         import threading as _threading
 
-        # ── Session hours (quick sync read — DB is ready before panel init) ──
+        lang = self._ui_lang   # resolve language once - used throughout this method
+
+        # ── Session hours (quick sync read - DB is ready before panel init) ──
         session_suffix = ""
         try:
             from hck_stats_engine.query_api import query_api as _qapi
@@ -536,26 +628,49 @@ class HCKGPTPanel:
             pass
 
         # ── First message: brand badge ("hck_GPT") + welcome + session ──
-        self.add_message(
-            f"hck_GPT: Welcome back \u2014 PC Workman is armed and ready.{session_suffix}"
-        )
+        # Applied with welcome_bg tag so it flows into the table block visually
+        try:
+            if self.log.winfo_exists():
+                self.log.config(state="normal")
+                _wb_start = self.log.index("end - 1c")
+        except Exception:
+            _wb_start = None
+
+        if lang == "pl":
+            self.add_message(
+                f"hck_GPT: Witaj z powrotem - PC Workman gotowy do dzialania.{session_suffix}"
+            )
+        else:
+            self.add_message(
+                f"hck_GPT: Welcome back - PC Workman is armed and ready.{session_suffix}"
+            )
         self.add_message("")
         # ── 3-column table (Commands | Quick check | OPERATIONS) ──────────
         self._add_welcome_tables()
+
+        # Extend welcome_bg tag to cover the greeting message above the table
+        try:
+            if _wb_start and self.log.winfo_exists():
+                self.log.config(state="normal")
+                _wb_end = self.log.index("end - 1c")
+                self.log.tag_add("welcome_bg", _wb_start, _wb_end)
+                self.log.config(state="disabled")
+        except Exception:
+            pass
 
         # Prevent auto-greeting from firing when panel first opens
         self._last_greeting_session = time.time()
 
         # ── Async: time-of-day greeting + yesterday's stats ──
-        _threading.Thread(target=self._add_startup_quip, daemon=True).start()
+        _threading.Thread(target=lambda: self._add_startup_quip(lang), daemon=True).start()
 
     def _add_welcome_tables(self):
         """
         3-column welcome table rendered directly in the log widget
         so each title gets its own color tag:
-          Commands     → teal
-          Quick check  → orange
-          OPERATIONS   → light_purple
+          Commands     -> teal
+          Quick check  -> orange
+          OPERATIONS   -> light_purple
 
         Column widths (chars):
           Commands:    outer=28  inner=26
@@ -585,6 +700,9 @@ class HCKGPTPanel:
 
         self.log.config(state="normal")
 
+        # Mark start position for welcome_bg tag
+        _start = self.log.index("end - 1c")
+
         # ── top border with colored titles ────────────────────────────────
         _w("┌─ ");           _w("Commands",    "teal")
         _w(" ───────────────┐  ┌─ ")
@@ -600,27 +718,37 @@ class HCKGPTPanel:
         # ── bottom border ─────────────────────────────────────────────────
         _w("└──────────────────────────┘  └────────────────────┘  └──────────────────────────┘\n")
 
+        # Apply near-black background to the entire welcome table
+        _end = self.log.index("end - 1c")
+        self.log.tag_add("welcome_bg", _start, _end)
+
         self.log.see("end")
         self.log.config(state="disabled")
 
-    def _add_startup_quip(self):
-        """
-        Background thread:
-          1) Time-of-day greeting  → hck_GPT: Good morning! / Good afternoon! / Good evening!
-          2) Yesterday summary     → CPU avg % + heaviest long-running app
-        """
+    def _add_startup_quip(self, lang="en"):
+        """Background thread: time-of-day greeting + yesterday stats."""
         from datetime import datetime as _dt, timedelta as _td
 
         # ── Greeting by hour ──────────────────────────────────────────────────
         hour = _dt.now().hour
-        if 5 <= hour < 12:
-            greeting = "Good morning!"
-        elif 12 <= hour < 18:
-            greeting = "Good afternoon!"
-        elif 18 <= hour < 22:
-            greeting = "Good evening!"
+        if lang == "pl":
+            if 5 <= hour < 12:
+                greeting = "Dzien dobry!"
+            elif 12 <= hour < 18:
+                greeting = "Milego popoludnia!"
+            elif 18 <= hour < 22:
+                greeting = "Dobry wieczor!"
+            else:
+                greeting = "Nocna sesja - szacunek."
         else:
-            greeting = "Late night session — respect."
+            if 5 <= hour < 12:
+                greeting = "Good morning!"
+            elif 12 <= hour < 18:
+                greeting = "Good afternoon!"
+            elif 18 <= hour < 22:
+                greeting = "Good evening!"
+            else:
+                greeting = "Late night session - respect."
 
         # ── Yesterday's data ─────────────────────────────────────────────────
         cpu_avg  = None
@@ -650,17 +778,30 @@ class HCKGPTPanel:
         # ── Build messages ────────────────────────────────────────────────────
         msg1 = f"hck_GPT: {greeting}"
 
-        if cpu_avg is not None and top_app:
-            msg2 = (
-                f"hck_GPT: Yesterday \u2014 CPU averaged {cpu_avg:.0f}%. "
-                f"Longest & heaviest: {top_app}."
-            )
-        elif cpu_avg is not None:
-            msg2 = f"hck_GPT: Yesterday \u2014 CPU averaged {cpu_avg:.0f}%. Clean run."
-        elif top_app:
-            msg2 = f"hck_GPT: Yesterday's top offender: {top_app}."
+        if lang == "pl":
+            if cpu_avg is not None and top_app:
+                msg2 = (
+                    f"hck_GPT: Wczoraj - CPU srednio {cpu_avg:.0f}%. "
+                    f"Najdluzszy i najciezszy: {top_app}."
+                )
+            elif cpu_avg is not None:
+                msg2 = f"hck_GPT: Wczoraj - CPU srednio {cpu_avg:.0f}%. Czysty przebieg."
+            elif top_app:
+                msg2 = f"hck_GPT: Wczorajszy pozeracz zasobow: {top_app}."
+            else:
+                msg2 = "hck_GPT: Brak danych z wczoraj - jeszcze zbieram dane."
         else:
-            msg2 = "hck_GPT: No data from yesterday yet \u2014 still collecting."
+            if cpu_avg is not None and top_app:
+                msg2 = (
+                    f"hck_GPT: Yesterday - CPU averaged {cpu_avg:.0f}%. "
+                    f"Longest & heaviest: {top_app}."
+                )
+            elif cpu_avg is not None:
+                msg2 = f"hck_GPT: Yesterday - CPU averaged {cpu_avg:.0f}%. Clean run."
+            elif top_app:
+                msg2 = f"hck_GPT: Yesterday's top offender: {top_app}."
+            else:
+                msg2 = "hck_GPT: No data from yesterday yet - still collecting."
 
         try:
             self.parent.after(0, lambda: self.add_message(""))
@@ -695,7 +836,7 @@ class HCKGPTPanel:
 
     # BRAND BADGE (first welcome message only)
     def _make_brand_badge(self):
-        """Inline badge showing 'hck_GPT' label — used for the first message only."""
+        """Inline badge showing 'hck_GPT' label - used for the first message only."""
         badge = tk.Canvas(
             self.log,
             width=62, height=14,
@@ -712,11 +853,11 @@ class HCKGPTPanel:
                           font=("Consolas", 6, "bold"), anchor="center")
         return badge
 
-    # USER BADGE — animated fill bar (green → yellow → red → green)
+    # USER BADGE - animated fill bar (green -> yellow -> red -> green)
     def _make_user_badge(self):
         """
         Animated 'USER' label badge.
-        Fills smoothly: green → yellow → red → green (≈ 9 s full cycle).
+        Fills smoothly: green -> yellow -> red -> green (≈ 9 s full cycle).
         Text color stays dark for contrast.
         """
         badge = tk.Canvas(
@@ -749,16 +890,16 @@ class HCKGPTPanel:
             g = int(c0[1] + (c1[1] - c0[1]) * t)
             b = int(c0[2] + (c1[2] - c0[2]) * t)
             badge.itemconfig(bg_rect, fill=f"#{r:02x}{g:02x}{b:02x}")
-            # 0.033 step × 100 ms interval → full 3-segment cycle ≈ 9 s
+            # 0.033 step × 100 ms interval -> full 3-segment cycle ≈ 9 s
             state['phase'] = (ph + 0.033) % 3.0
             badge.after(100, _tick)
 
         _tick()
         return badge
 
-    # ADD USER MESSAGE — badge + text (replaces old "> " prefix)
+    # ADD USER MESSAGE - badge + text (replaces old "> " prefix)
     def _add_user_message(self, text: str):
-        """Insert user message with animated USER badge — no '>' prefix."""
+        """Insert user message with animated USER badge - no '>' prefix."""
         try:
             if not self.log.winfo_exists():
                 return
@@ -774,7 +915,7 @@ class HCKGPTPanel:
         self.log.config(state="disabled")
         self._bind_process_tooltips()
 
-    # CONVERSATION TURN BACKGROUND — subtle burgundy tint over Q&A pair
+    # CONVERSATION TURN BACKGROUND - subtle burgundy tint over Q&A pair
     _TURN_BG = "#1a1014"  # ~10 % blend of bordeaux #7a0f20 onto bg_panel #0f1114
 
     def _apply_turn_background(self, turn_start: str):
@@ -803,7 +944,7 @@ class HCKGPTPanel:
 
     def register_nav_callback(self, name: str, callback) -> None:
         """
-        Register a named navigation callback for [→ Name] links in chat.
+        Register a named navigation callback for [-> Name] links in chat.
         Call this from the main window after creating the panel, e.g.:
             panel.register_nav_callback("Optimization",
                                         lambda: win._switch_to_page("optimization"))
@@ -821,18 +962,18 @@ class HCKGPTPanel:
 
     def _apply_nav_links(self, start_pos: str) -> None:
         """
-        Scan the text just inserted at start_pos for [→ Name] patterns.
+        Scan the text just inserted at start_pos for [-> Name] patterns.
         Each match gets a unique teal-underline tag; if a callback is registered
         for that name the tag is also bound to <Button-1> (clickable link).
         """
         end_pos = self.log.index("end")
         idx = start_pos
         while True:
-            pos = self.log.search(r'\[→ [^\]]+\]', idx, stopindex=end_pos, regexp=True)
+            pos = self.log.search(r'\[-> [^\]]+\]', idx, stopindex=end_pos, regexp=True)
             if not pos:
                 break
             line_text = self.log.get(pos, f"{pos} lineend")
-            m = re.match(r'\[→ ([^\]]+)\]', line_text)
+            m = re.match(r'\[-> ([^\]]+)\]', line_text)
             if not m:
                 idx = f"{pos}+1c"
                 continue
@@ -856,7 +997,7 @@ class HCKGPTPanel:
                                   lambda e: self.log.config(cursor=""))
             idx = match_end
 
-    # ACTIVE TIP — hide the tip strip
+    # ACTIVE TIP - hide the tip strip
     def _remove_active_tip(self) -> None:
         if not self._tip_active:
             return
@@ -866,7 +1007,39 @@ class HCKGPTPanel:
             pass
         self._tip_active = False
 
-    # INSERT TIP — show/update tip strip (guaranteed max 1 tip, instant replace)
+    # ── HOT ALERT STRIP ──────────────────────────────────────────────────────
+
+    def _set_hot(self, msg: str) -> None:
+        """Show (or silently update) the HOT strip. No spam: once shown stays
+        until _clear_hot() is called."""
+        try:
+            if not self._hot_strip.winfo_exists():
+                return
+        except Exception:
+            return
+        self._hot_label.config(text=msg)
+        if not self._hot_active:
+            # HOT always sits directly above TIP (or above entry if no TIP)
+            # Never replaces TIP — both can be visible simultaneously
+            self._hot_strip.pack(
+                fill="x", padx=8, pady=(0, 1),
+                before=self._tip_strip
+            )
+            self._hot_active = True
+        self._hot_msg = msg
+
+    def _clear_hot(self) -> None:
+        """Hide the HOT strip once conditions return to normal."""
+        if not self._hot_active:
+            return
+        try:
+            self._hot_strip.pack_forget()
+        except Exception:
+            pass
+        self._hot_active = False
+        self._hot_msg    = ""
+
+    # INSERT TIP - show/update tip strip (guaranteed max 1 tip, instant replace)
     def _insert_tip(self, msg: str) -> None:
         try:
             if not self._tip_strip.winfo_exists():
@@ -900,7 +1073,7 @@ class HCKGPTPanel:
         self.log.config(state="normal")
         if msg.startswith("hck_GPT:"):
             if self._brand_badge_once:
-                # First ever hck_GPT message → brand badge + strip "hck_GPT:" prefix
+                # First ever hck_GPT message -> brand badge + strip "hck_GPT:" prefix
                 badge = self._make_brand_badge()
                 self._brand_badge_once = False
                 msg = msg[len("hck_GPT:"):].lstrip()
@@ -912,6 +1085,10 @@ class HCKGPTPanel:
             self.log.insert("end", " ")
         start_pos = self.log.index("end")
         self.log.insert("end", msg + "\n")
+        end_pos = self.log.index("end - 1c")
+        # Advisory tip messages (contain 💡) get a subtle green background
+        if "\U0001f4a1" in msg:
+            self.log.tag_add("tip_green", start_pos, end_pos)
         self._apply_inline_colors(start_pos)
         self._apply_nav_links(start_pos)
         self.log.see("end")
@@ -923,13 +1100,13 @@ class HCKGPTPanel:
     def _apply_inline_colors(self, start_pos: str):
         """Colorize keywords in the just-inserted text range [start_pos … end]."""
         end_pos = self.log.index("end")
-        # (pattern, tag)  — applied in order; first match wins for overlapping
+        # (pattern, tag)  - applied in order; first match wins for overlapping
         patterns = [
-            (r'\d+\.?\d*\s*°C',          "orange"),        # temperatures   → orange
-            (r'\d+\.?\d*\s*(?:MB|GB)',    "light_purple"),  # sizes          → light purple
-            (r'\d+\.?\d*%',              "teal"),           # percentages    → teal
-            (r'⚠\S*',                    "yellow"),         # warning symbol → yellow
-            (r'◈\s+\S[^\n]*',            "teal"),           # ◈ section headers → teal
+            (r'\d+\.?\d*\s*°C',          "orange"),        # temperatures   -> orange
+            (r'\d+\.?\d*\s*(?:MB|GB)',    "light_purple"),  # sizes          -> light purple
+            (r'\d+\.?\d*%',              "teal"),           # percentages    -> teal
+            (r'⚠\S*',                    "yellow"),         # warning symbol -> yellow
+            (r'◈\s+\S[^\n]*',            "teal"),           # ◈ section headers -> teal
         ]
         for pattern, tag in patterns:
             idx = start_pos
@@ -947,7 +1124,7 @@ class HCKGPTPanel:
                 idx = match_end
 
     def add_colored(self, text, tag=None):
-        """Add text with a color tag (no newline — caller controls layout)."""
+        """Add text with a color tag (no newline - caller controls layout)."""
         try:
             if not self.log.winfo_exists():
                 return
@@ -997,7 +1174,7 @@ class HCKGPTPanel:
         self.is_open = True
         self.chat.pack(side="top", fill="both")
         self.banner.itemconfig(self.banner_arrow, text="▲")
-        self.banner.itemconfig(self.banner_text, text="hck_GPT  —  Your PC Companion")
+        self.banner.itemconfig(self.banner_text, text="hck_GPT  -  Your PC Companion")
         self._animate(self.collapsed_h, self.total_h)
 
         self._show_auto_greeting()
@@ -1008,7 +1185,7 @@ class HCKGPTPanel:
     def close(self):
         self.is_open = False
         self.banner.itemconfig(self.banner_arrow, text="▼")
-        self.banner.itemconfig(self.banner_text, text="hck_GPT  —  Your PC Companion")
+        self.banner.itemconfig(self.banner_text, text="hck_GPT  -  Your PC Companion")
         self._animate(self.total_h, self.collapsed_h,
                       on_end=lambda: self.chat.pack_forget())
 
@@ -1046,9 +1223,19 @@ class HCKGPTPanel:
             except Exception:
                 pass
             self._ticker_id = None
+        self._stop_banner_ticker()
+
+    def _stop_banner_ticker(self):
+        """Cancel the banner status ticker."""
+        if self._banner_ticker_id is not None:
+            try:
+                self.frame.after_cancel(self._banner_ticker_id)
+            except Exception:
+                pass
+            self._banner_ticker_id = None
 
     def _tick_insight(self):
-        """Show contextual insight every 6 minutes — replaces previous tip (no spam)."""
+        """Show contextual insight every 6 minutes - replaces previous tip (no spam)."""
         if not self.is_open:
             return
 
@@ -1071,14 +1258,14 @@ class HCKGPTPanel:
         except Exception:
             pass
 
-    # PROACTIVE MONITOR — silent banner update
+    # PROACTIVE MONITOR - silent banner update
     def _set_banner_status(self, status: str) -> None:
         """Called by proactive_monitor (via after()) to update banner text silently."""
         try:
             if not self.is_open and self.banner.winfo_exists():
                 self.banner.itemconfig(
                     self.banner_text,
-                    text=f"hck_GPT  —  {status}"
+                    text=f"hck_GPT  -  {status}"
                 )
         except Exception:
             pass
@@ -1100,7 +1287,7 @@ class HCKGPTPanel:
             try:
                 status = self.chat_handler.insights.get_banner_status()
                 if status:
-                    text = f"hck_GPT  —  {status}"
+                    text = f"hck_GPT  -  {status}"
                     self.banner.itemconfig(self.banner_text, text=text)
             except Exception:
                 pass
@@ -1149,7 +1336,7 @@ class HCKGPTPanel:
         _LANGS = [
             ("Default (auto)",  "auto", True,  ""),
             ("English",         "en",   True,  ""),
-            ("Polski",          "pl",   True,  "⚠ not stable"),
+            ("Polski",          "pl",   True,  ""),
             ("Deutsch",         "de",   False, "soon"),
         ]
 
@@ -1160,7 +1347,7 @@ class HCKGPTPanel:
                            cursor="hand2" if available else "arrow")
             row.pack(fill="x", padx=5, pady=1)
 
-            # Accent bar (left edge — visible when selected)
+            # Accent bar (left edge - visible when selected)
             tk.Frame(row, bg="#c0182a" if is_sel else "#0d0f14",
                      width=2).pack(side="left", fill="y")
 
@@ -1181,7 +1368,10 @@ class HCKGPTPanel:
 
             if available and not is_sel:
                 def _select(c=code):
-                    self._ui_lang = c
+                    if c in ("en", "pl"):
+                        _i18n_set_lang(c)   # fires _on_i18n_lang_changed -> updates _ui_lang + refreshes
+                    else:
+                        self._ui_lang = c
                     pop.destroy()
                 row.bind("<Button-1>", lambda e, c=code: _select(c))
                 for child in row.winfo_children():
